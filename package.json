@@ -1,7 +1,7 @@
 {
-  "name": "@zguiyang/pi-worker-mcp",
+  "name": "@zguiyang/pi-task-exec",
   "version": "0.1.1",
-  "mcpName": "io.github.zguiyang/pi-worker-mcp",
+  "mcpName": "io.github.zguiyang/pi-task-exec",
   "description": "A host-agnostic MCP worker runtime for supervising local Pi coding-agent processes.",
   "license": "MIT",
   "type": "module",
@@ -9,20 +9,23 @@
     "node": ">=20"
   },
   "bin": {
-    "pi-worker-mcp": "./dist/index.js"
+    "pi-task-exec": "./mcp/dist/index.js"
   },
   "files": [
-    "dist",
+    "mcp/dist/**",
+    "skills/pi-delegate/**",
     "README.md",
+    "mcp/README.md",
     "LICENSE",
+    "mcp/LICENSE",
     "server.json"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "npm run build && node --test --test-concurrency=1 tests/*.test.mjs",
+    "build": "tsc -p mcp/tsconfig.json",
+    "typecheck": "tsc --noEmit -p mcp/tsconfig.json",
+    "test": "npm run build && node --test --test-concurrency=1 mcp/tests/*.test.mjs",
     "prepack": "npm run build",
-    "start": "node dist/index.js serve"
+    "start": "node mcp/dist/index.js serve"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.0.0",

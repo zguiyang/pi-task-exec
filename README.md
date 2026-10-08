@@ -13,21 +13,23 @@ structured status/result → Supervisor review and acceptance.
 `inspect`/`implement` are tool capability profiles and `direct`/`worktree` are
 working-directory modes; neither is an operating-system security sandbox.
 
-> Status: Phase 2 (repository base files and Git initialization) only. Phase 2
-> did not build or test the integrated root package and no release has
-> occurred; the `mcp/dist/` files already present are migrated module build
-> artifacts, not an integrated-root-package build.
+> Status: Phase 3 (root `package.json`, lockfile, and `server.json`
+> integration) has been prepared in this checkout. The integrated root package
+> has not been built or tested and no release has occurred; the `mcp/dist/`
+> files already present are migrated module build artifacts, not an
+> integrated-root-package build.
 
 ## Current status and non-claims
 
-This is a newly prepared checkout. The currently authorized scope (Phase 2)
-covers only repository foundation files, the root `.gitignore`, the root
-license, and Git initialization.
+The currently authorized scope adds Phase 3 (root `package.json` and lockfile
+integration) to the Phase 2 repository foundation files, the root `.gitignore`,
+the root license, and Git initialization. Phase 3 is prepared but not yet
+accepted by the Supervisor.
 
 The following are **not** implemented and are **not** claimed by this
 repository state:
 
-- no root `package.json`, lockfile, packaging, or npm publication;
+- no npm packaging or publication;
 - no `pi-task-exec` CLI behavior, installer, `setup`, or `doctor`;
 - no cross-platform host support or verified installation paths;
 - no MCP Registry record, release, or version compatibility promise.
@@ -81,20 +83,22 @@ occupied at publication time.
 | `.gitignore` | Root ignore rules. |
 
 `mcp/dist/` is generated build output from `mcp/src/` and is intentionally not
-tracked. The planned root `package.json`/`server.json` and the integrated
-build and release flow belong to later phases and do not exist yet.
+tracked. The root `package.json`, `package-lock.json`, and `server.json` now
+exist for the interim integration; the integrated build and release flow is not
+yet verified.
 
 ## Migration and development status
 
 This checkout is being assembled as a single repository from two existing
 sources. Migration is in an early, authorized-phase state:
 
-- **Phase 2 (current):** Git initialization and repository base files only.
-- Later phases (root package metadata, build-path migration, Skill packaging,
-  old-name cleanup, CLI implementation, multi-platform installers, contract
-  synchronization, CI, tarball acceptance, npm/Registry publication, and
-  finally source retirement) are planned but not started or not authorized in
-  this checkout.
+- **Phase 3 (current):** Root `package.json`, lockfile, and `server.json`
+  integration, with build/typecheck/test scripts pointing at `mcp/tsconfig.json`
+  and `mcp/tests/*.test.mjs`. Phase 2 repository base files remain in place.
+- Later phases (Skill packaging, old-name cleanup, CLI implementation,
+  multi-platform installers, contract synchronization, CI, tarball acceptance,
+  npm/Registry publication, and finally source retirement) are planned but not
+  started or not authorized in this checkout.
 
 **Both old projects remain.** The previous repositories and their local
 checkouts are not retired, renamed, or deleted. They are only to be retired as
