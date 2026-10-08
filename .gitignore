@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+
+# Build output (generated from mcp/src via the build/prepack flow)
+mcp/dist/
+*.tsbuildinfo
+
+# Test and coverage output
+coverage/
+.nyc_output/
+.pi-worker-mcp/
+mcp/.pi-worker-mcp/
+
+# Temporary build/test files and directories
+tmp/
+temp/
+.tmp/
+*.tmp
+*.temp
+
+# npm and package-manager debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.npm/
+
+# Local, machine-specific host configuration
+.codex/
+**/.codex/config.toml
+.env
+.env.*
+!.env.example
+
+# OS metadata
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor / IDE temporary files
+*.swp
+*.swo
+*~
+*.orig
+*.rej
+.idea/
