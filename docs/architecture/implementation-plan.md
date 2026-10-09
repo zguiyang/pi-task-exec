@@ -1,6 +1,6 @@
 # Pi TaskExec 实施计划
 
-状态（2026-10-09）：阶段 1–8 已实现；阶段 6–8 待 Supervisor 审查；选型 A 根级目录重构已在当前 `main` checkout 实施（HEAD `c49c48e`），本轮收尾验收与文档修正待 Supervisor 审查；阶段 9 尚未开始，待本轮审查后按原范围决定启动；阶段 10–15 未开始，范围与顺序保持原计划；npm 和 MCP Registry 均未发布。
+状态（2026-10-09）：阶段 1–8 已实现；阶段 6–8 与选型 A 根级目录重构待 Supervisor 审查；阶段 9A（固定 Skills CLI/GitHub Skill 安装）和阶段 9B（交互 CLI/统一 setup）已在当前 `codex/stage-09a-skills-cli` 工作区实施，尚未提交并待 Supervisor 审查；阶段 9C 仅保留隔离环境真实安装验收，`update`/`remove skill` 仍延后；阶段 10–15 未开始；npm 和 MCP Registry 均未发布。
 日期：2026-10-09
 
 本计划按依赖顺序执行。任何阶段均不得越过公开发布门槛；Registry ID 冲突时停止，不回退旧名称。阶段 1–8 已完成，阶段 6、7、8 待 Supervisor 审查；后续阶段仍须单独遵守其授权和发布门槛。
@@ -94,16 +94,12 @@
 - **人工决策**：Host/平台的支持边界；若某组合不可验证，明确不支持。
 - **迁移时实施快照（历史；其中旧路径不表示当前结构）**：已实现 Codex、Zed、OpenCode 的真实安装/移除适配器（`mcp/src/hosts/`）。路径解析：Codex 用户级遵循 `$CODEX_HOME`，否则 `~/.codex/config.toml`，项目级 `.codex/config.toml`；Zed 用户级：macOS/Linux 遵循 `$XDG_CONFIG_HOME/zed/settings.json`，否则 `~/.config/zed/settings.json`；Windows 使用 `%APPDATA%\Zed\settings.json`（按平台使用 win32 路径语义），项目级 `.zed/settings.json`；OpenCode 用户级遵循 `OPENCODE_CONFIG`，否则 `OPENCODE_CONFIG_DIR`/`$XDG_CONFIG_HOME` 下的 `opencode.json`，项目级 `opencode.json`；受支持的文件名仅为官方 `opencode.json`/`opencode.jsonc`，不再考虑 `config.json`。格式：Codex 使用 TOML parser（`smol-toml`）校验加字符级表区域扫描，保留无关 section、值与注释；Zed/OpenCode 使用 `jsonc-parser` 做保注释、保留无关字段的最小编辑，无法安全解析时拒绝写入。OpenCode 采用稳定 schema `mcp.<name>`、`type: "local"`、`command` 数组，不使用 `mcp.servers`。安装/移除基于严格的 pi-task-exec 受管指纹：仅当现有条目与本次将要写入的条目逐字段完全一致时才是幂等；旧版本、不同本地路径、额外或被修改的字段均为指纹漂移，add 报冲突且绝不覆盖，remove 报冲突且绝不删除。真实写入复用阶段 7 执行器与安全原语（绝对路径、根边界与符号链接保护、同目录临时文件加原子 rename、写入前备份、失败回滚）。npm 安装模式为默认，启动为 `npx -y @zguiyang/pi-task-exec@<version> mcp serve`；源码 checkout 模式必须显式传入 `--local-dev`，否则计划报 `local_dev_required` 且不写入，写入值为 `node <绝对 checkout>/mcp/dist/index.js mcp serve`，均以结构化 argv 传递、不经过 shell。真实 `.git` checkout 检测优先于 `PI_TASK_EXEC_LAUNCH_MODE`：存在 `.git` 时不能被强制为 npm 模式，避免把未发布的 checkout 表示成已发布的 npx 包；`--local-dev` 仍是写入本地 node 路径的唯一入口。项目级计划与 doctor 明确提示 Codex trusted project 与 Zed Restricted Mode 不会由本工具授予。计划 JSON/文本与 doctor 输出 host/platform、绝对配置路径、配置格式、被修改的配置 key、支持状态、备份策略、重启与 trust 要求；doctor 另报告解析状态与受管/指纹漂移状态，均不输出文件内容。绝对 `CODEX_HOME`/`OPENCODE_CONFIG`/`OPENCODE_CONFIG_DIR`/`XDG_CONFIG_HOME` 覆盖被视为用户显式选择并加入执行 roots，避免通用 path_escape 失败。已新增 TOML/JSONC 与三 Host 适配器测试（隔离临时 home/cwd 与 mock 环境变量，不触碰真实用户配置）；`npm test`、`npm run build`、`npm run typecheck`、`npm pack --dry-run --json` 均通过。未发布 npm/Registry，未改动 MCP 工具名/schema 与 Worker 运行时。
 
-## 阶段 9：通用 .agents/skills 安装器（尚未开始，待 Supervisor 审查）
+## 阶段 9：通用 .agents/skills 安装器（阶段 9A/9B 已实施，其余待 Supervisor 审查）
 
-- **状态**：本轮不实施 Skill 安装器。根目录重构、142 项回归与当前 tarball 的干净 prefix MCP smoke 已通过；待 Supervisor 审查本轮收尾后，再决定是否按本阶段原范围启动。阶段 9 不与目录重构混为同一变更。
-- **前置依赖**：阶段 5、7；Skill 许可明确；**2026-10-09 根级目录重构完成，根级测试与真实 tarball 验收通过**；Skill 源路径稳定为根 `skills/pi-delegate/`，安装器从包根稳定定位该目录，不引用旧 `mcp/dist` 或旧资源路径。
-- **修改范围**：Skill 安装器（预期位于根 `cli/installers/`）、根 `tests/` 下的 CLI/Skill 安装测试、安装 manifest 格式。
-- **具体任务**：实现 `.agents/skills/pi-delegate` 的 project/global scope；从根 `skills/pi-delegate/` 读取 Skill 源；使用 Node home API；dry-run、同内容幂等、差异冲突默认拒绝、显式备份升级、原子 staging/rename 与回滚检查。
-- **验收条件**：根 `tests/` 下 macOS/Linux/Windows 路径测试通过；不会覆盖不同内容的同名 Skill；备份和恢复只操作管理器记录且未被用户修改的文件。
-- **回滚方式**：根据 manifest 恢复旧目录；有用户修改则停止并保留现场。
-- **公开发布影响**：无。
-- **人工决策**：本轮已完成目录重构与当前包布局验收；由 Supervisor 审查后决定是否启动本阶段。项目级是否作为交互式默认值仍须决定；global 必须可显式选择。
+- **状态**：阶段 9A 已在 `codex/stage-09a-skills-cli` 实施：`add skill` 经固定 Vercel Skills CLI `skills@1.7.1` 从固定 GitHub 源 `https://github.com/zguiyang/pi-task-exec`（子路径 `skills/pi-delegate`）安装；release ref 为 `v${packageVersion}`，源码 checkout 使用固定 40 位提交 `f914707fa22fd658f50e059a5091440796ef39e0`；使用结构化 `spawn(shell:false)`、`--copy`/`--yes`/`--json`，关闭遥测，并在执行后校验安装文件与 lockfile 的 source/ref（非事务、不承诺回滚）。
+- **阶段 9B（交互 CLI 与统一 setup）**：`setup` 默认 MCP + Skill，仅对缺失的 Agent/Scope 询问方向键选项；`add mcp`/`add skill` 也提示缺少的选择。确认菜单默认 No，`--json` 不提示，取消无副作用。统一 `setup` 使用同一 InstallPlan，分别执行 MCP 与 Skills CLI 并报告各自结果；一方失败时保留另一方成功并报告 `partial`。Skills CLI 的所有目标须通过 roots 校验；越界、符号链接、非目录目标和锁文件冲突直接拒绝，只有普通同名 Skill 目录可在明确确认后覆盖。`XDG_STATE_HOME` 是显式 global lock root。`update`/`remove skill`、事务回滚、Manifest 与自动备份管理不在本阶段范围。
+- **阶段 9C 最小待办**：Supervisor 审查并接受 9A/9B；之后只在隔离的临时 HOME、项目目录和 npm 缓存中，针对固定 GitHub ref 实际运行一次 Skills CLI 安装，重复运行检查幂等结果，并清理本阶段创建的全部资源。`update`/`remove skill` 另行拆分范围，不作为此验收的前置项。
+- **验收记录**：阶段 9B 本地测试使用注入的 interaction 与 Skills CLI fake，不访问真实用户目录，也不进行真实 Skills CLI 下载/安装；根级 build、typecheck、test 与 diff check 均通过。真实安装验收待 9C。
 
 ## 阶段 10：MCP/Skill 契约同步与工具改名
 

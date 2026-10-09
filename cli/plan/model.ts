@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import type { HostAdapter, HostTarget, McpLaunchSpec } from "../hosts/adapters.js";
-import type { SkillInstaller } from "../installers/skill.js";
+import type { HostAdapter, HostId, HostTarget, McpLaunchSpec } from "../hosts/adapters.js";
+import type { SkillCliPlan, SkillInstaller } from "../installers/skill.js";
 import { PACKAGE_NAME, SKILL_NAME } from "../identity.js";
 import { sha256 } from "./safety.js";
 
@@ -97,6 +97,8 @@ export interface InstallPlan {
   warnings: PlanWarning[];
   unsupported: UnsupportedCapability[];
   supported: boolean;
+  /** Present for the pinned Skills CLI `add skill` install. */
+  skillCli?: SkillCliPlan;
 }
 
 export interface PlanRequest {
@@ -241,6 +243,30 @@ export function serializePlan(plan: InstallPlan): Record<string, unknown> {
     conflicts: [...plan.conflicts].sort(byPath).map((conflict) => ({ code: conflict.code, path: conflict.path, message: conflict.message })),
     backups: [...plan.backups].sort(byPath).map((backup) => ({ path: backup.path, backupPath: backup.backupPath, strategy: backup.strategy, reason: backup.reason })),
     warnings: [...plan.warnings].sort(byCode).map((warning) => ({ code: warning.code, message: warning.message })),
+    skillCli: plan.skillCli
+      ? {
+          installer: plan.skillCli.installer,
+          cliVersion: plan.skillCli.cliVersion,
+          agent: plan.skillCli.agent,
+          scope: plan.skillCli.scope,
+          repository: plan.skillCli.repository,
+          subpath: plan.skillCli.subpath,
+          source: plan.skillCli.source,
+          ref: plan.skillCli.ref,
+          refKind: plan.skillCli.refKind,
+          command: plan.skillCli.command,
+          args: [...plan.skillCli.args],
+          cwd: plan.skillCli.cwd,
+          installDir: plan.skillCli.installDir,
+          skillFile: plan.skillCli.skillFile,
+          contractFile: plan.skillCli.contractFile,
+          lockFile: plan.skillCli.lockFile,
+          expectedSource: plan.skillCli.expectedSource,
+          expectedRef: plan.skillCli.expectedRef,
+          lossWarning: plan.skillCli.lossWarning,
+          safety: plan.skillCli.safety.map((item) => ({ path: item.path, kind: item.kind, message: item.message })),
+        }
+      : null,
     unsupported: [...plan.unsupported].sort(byCode).map((item) => ({
       code: item.code,
       target: item.target,
@@ -277,6 +303,16 @@ export function formatPlan(plan: InstallPlan): string {
   lines.push(`Backup strategy: ${plan.backups.length > 0 ? (plan.backups[0]?.strategy ?? "none") : "none"}`);
   if (plan.resolvedPaths.config) lines.push(`Config path: ${plan.resolvedPaths.config}`);
   if (plan.resolvedPaths.skillDir) lines.push(`Skill path: ${plan.resolvedPaths.skillDir}`);
+  if (plan.skillCli) {
+    const cli = plan.skillCli;
+    lines.push(`Skill installer: ${cli.installer}@${cli.cliVersion}`);
+    lines.push(`Skill agent: ${cli.agent}`);
+    lines.push(`Skill source: ${cli.repository} (${cli.subpath})`);
+    lines.push(`Skill ref: ${cli.ref} (${cli.refKind})`);
+    lines.push(`Skill command: ${cli.command} ${cli.args.join(" ")}`);
+    lines.push(`Skill install path: ${cli.installDir}`);
+    lines.push(`Skill lock path: ${cli.lockFile}`);
+  }
   const section = (title: string, entries: string[]) => {
     lines.push(`${title}:`);
     if (entries.length === 0) lines.push("  (none)");
@@ -287,6 +323,7 @@ export function formatPlan(plan: InstallPlan): string {
   section("Removals", plan.removals.map((item) => `${item.path} — ${item.summary}`));
   section("Backups", plan.backups.map((item) => `${item.path} -> ${item.backupPath} (${item.strategy}; ${item.reason})`));
   section("Conflicts", plan.conflicts.map((item) => `${item.path} — ${item.message}`));
+  section("Skill safety", (plan.skillCli?.safety ?? []).map((item) => `${item.path} — ${item.message}`));
   section("Unsupported", plan.unsupported.map((item) => `${item.target}${item.host ? `/${item.host}` : ""} — ${item.message}`));
   section("Warnings", plan.warnings.map((item) => `${item.code} — ${item.message}`));
   return lines.join("\n");
@@ -420,14 +457,34 @@ async function planSkill(plan: InstallPlan, request: PlanRequest, deps: PlanDepe
     plan.conflicts.push({ code: "missing_selection", path: "", message: "Skill operations require an explicit --scope." });
     return;
   }
+  const host = request.host;
+  if (request.operation === "add") {
+    if (!host) {
+      plan.conflicts.push({ code: "missing_agent", path: "", message: "add skill requires an explicit --host codex|zed|opencode to select the Skill Agent." });
+      return;
+    }
+    if (!deps.adapters.some((adapter) => adapter.id === host)) {
+      plan.unsupported.push({
+        code: "unknown_host",
+        target: "skill",
+        host,
+        scope,
+        message: `No Skill Agent is registered for "${host}".`,
+      });
+      return;
+    }
+  }
   const directory = skillTargetDir(scope, deps.context);
   plan.resolvedPaths.skillDir = directory;
   const result = await deps.skillInstaller.plan({
+    operation: request.operation,
     scope,
     context: deps.context,
+    ...(host !== undefined ? { host: host as HostId } : {}),
     sourceDir: join(deps.packageRoot, "skills", SKILL_NAME),
     packageVersion: deps.packageVersion,
     currentContent: null,
+    launchMode: deps.launchMode,
   });
   if (result.kind === "unsupported") {
     plan.unsupported.push(result.capability);
@@ -435,6 +492,7 @@ async function planSkill(plan: InstallPlan, request: PlanRequest, deps: PlanDepe
   }
   for (const warning of result.plan.warnings) plan.warnings.push(warning);
   for (const conflict of result.plan.conflicts) plan.conflicts.push(conflict);
+  if (result.plan.cli) plan.skillCli = result.plan.cli;
   for (const write of result.plan.writes) {
     const kind = write.baseSha256 === null ? "create" : "update";
     plan[kind === "create" ? "creates" : "updates"].push({

@@ -20,8 +20,10 @@ neither is an operating-system security sandbox.
 > A: root `cli/`, `mcp/`, `skills/`, `tests/`, `docs/`, and root `dist/`) are
 > implemented in this checkout. Stage 8 adds real Codex, Zed, and OpenCode MCP
 > install/remove with safe TOML/JSONC merging, backups, and managed-entry
-> removal. Stage 9 (the generic `.agents/skills/` installer) and stage 10
-> (MCP/Skill contract synchronization and tool renaming) have not started. The
+> removal. Stage 9A adds `add skill`: it installs `pi-delegate` through the
+> pinned Vercel Skills CLI v1.7.1 from the fixed GitHub source. The combined
+> `setup`/`update` flows and `remove skill` remain deferred. Stage 10
+> (MCP/Skill contract synchronization and tool renaming) has not started. The
 > npm package and MCP Registry entry have not been published. Local tarball
 > prepack, archive-content checks, and a separate clean npm prefix installation
 > with full MCP initialize/list-tools smoke have passed for the current `pi_*`
@@ -45,11 +47,11 @@ the MCP Registry entry. All six MCP tools (`pi_spawn`, `pi_status`,
 | `pi-task-exec --version` | Prints only `0.1.1` and exits `0`; never starts MCP. |
 | `pi-task-exec mcp serve` | Starts the existing MCP stdio runtime. |
 | `pi-task-exec doctor [--json]` | Read-only environment, host, skill, and version-contract check; never starts MCP. |
-| `pi-task-exec add mcp --host <codex\|zed\|opencode> --scope <project\|global> [--dry-run] [--json] [--yes]` | Plans and safely merges the host MCP entry (stage 8); never starts MCP. |
+| `pi-task-exec add mcp [--host <codex\|zed\|opencode>] [--scope <project\|global>] [--dry-run] [--json] [--yes]` | Plans and safely merges the host MCP entry (stage 8); never starts MCP. On a TTY, a missing `--host`/`--scope` is an arrow-key prompt; `--json` fails instead of prompting. |
 | `pi-task-exec remove mcp --host <...> --scope <...>` | Plans removal of only the managed host MCP entry; never starts MCP. |
-| `pi-task-exec add skill --scope <project\|global>` | Plans the bundled skill through the installer seam; never starts MCP. |
-| `pi-task-exec remove skill --scope <project\|global>` | Plans skill removal through the installer seam; never starts MCP. |
-| `pi-task-exec setup --target <mcp\|skill\|both> [--host <...>] --scope <...>` | Plans combined setup; never starts MCP. |
+| `pi-task-exec add skill [--host <codex\|zed\|opencode>] [--scope <project\|global>] [--dry-run] [--json] [--yes]` | Plans and installs the `pi-delegate` Skill through the pinned Vercel Skills CLI v1.7.1 from the fixed GitHub source; never starts MCP. On a TTY, a missing `--host`/`--scope` is an arrow-key prompt. |
+| `pi-task-exec remove skill --scope <project\|global>` | Plans skill removal through the installer seam; stage 9A leaves this deferred. |
+| `pi-task-exec setup [--target <mcp\|skill\|both>] [--host <...>] [--scope <...>]` | Plans the unified MCP + Skill setup in one plan by default. On a TTY, only missing Agent/Scope are arrow-key prompts; `--target` is an explicit non-interactive override. |
 
 Only the explicit `mcp serve` route initializes and starts the MCP runtime.
 Ordinary `help`, `--version`, `add`, `remove`, `setup`, and `doctor` do not
@@ -61,14 +63,27 @@ separately testable plan executor. Every write command first prints a plan with
 full absolute paths, creates/updates/removals, conflicts, backups, warnings,
 and unsupported capabilities, then revalidates the plan immediately before
 executing. `--dry-run` prints the plan and exits without writing; `--json`
-emits stable, secret-free JSON; `--yes` may skip confirmation only after the
-plan is printed. Any conflict blocks the whole operation, and `--host` and
-`--scope` are mandatory for MCP add/remove/setup.
+emits stable, secret-free JSON and never prompts, so a missing selection is an
+error; `--yes` may skip confirmation only after the plan is printed. On a TTY,
+`add mcp`, `add skill`, and `setup` prompt for missing Agent/Scope with arrow
+keys, then ask a default-No Yes/No confirmation; `setup` is always the unified
+MCP + Skill plan unless an explicit `--target` overrides it, and `--json` fails
+for missing Agent/Scope without prompting. The prompts are injectable and
+cancellation performs no writes. Any conflict blocks
+the whole operation, and `--host`/`--scope` remain mandatory for non-interactive
+MCP add/remove/setup.
+
+A unified `setup` builds one plan containing both the MCP config write and the
+Skills CLI install. The two targets run independently and report their own
+status and errors: if one succeeds and the other fails, the result status is
+`partial` and the successful mutations are preserved.
 
 The current `pi_*` MCP tools remain in place; their migration to `task_*` is
 planned for stage 10. Stage 8 implements the Codex (TOML), Zed (JSONC), and
-OpenCode (JSONC) adapters; the generic `.agents/skills` installer is still
-deferred to stage 9, so skill operations report pending/unavailable. Every real
+OpenCode (JSONC) adapters. Stage 9A implements `add skill` through the pinned
+Vercel Skills CLI v1.7.1; `setup` now installs the Skill when an Agent is
+selected, while the `update` flow and `remove skill` remain deferred, so those
+operations report unsupported. Every real
 MCP write is path-boundary and symlink checked, writes through a same-directory
 temporary file with an atomic rename, backs up an existing config before an
 update, refuses malformed or conflicting config, and removes only an entry that
@@ -91,8 +106,9 @@ reports an error and exits `1`.
 
 ## Installation and launch contract
 
-Prerequisites: Node.js 20+, a locally installed and configured `pi` executable,
-and Git when using isolated worktrees.
+Prerequisites: Node.js 22.20+, a locally installed and configured `pi` executable,
+and Git when using isolated worktrees. The Skill installer invokes the pinned
+`skills@1.7.1` CLI, which also requires Node.js 22.20+.
 
 The npm package has not been published, so it cannot currently be installed
 from npm. The `add`/`remove`/`setup` commands perform real host configuration
@@ -164,13 +180,55 @@ does not grant either trust. OpenCode reads a custom config file from
 `OPENCODE_CONFIG` and a custom config directory from `OPENCODE_CONFIG_DIR`; the
 inline `OPENCODE_CONFIG_CONTENT` value is never written and is reported as a
 runtime override. `OPENCODE_DISABLE_PROJECT_CONFIG` disables the project file.
-Skill installation still reports pending/unavailable.
+
+## Skill installation (stage 9A)
+
+`add skill` installs the bundled `pi-delegate` Skill by invoking the pinned
+Vercel Skills CLI `skills@1.7.1`. It is GitHub-only and never accepts a local
+path or another registry:
+
+- Source repository: `https://github.com/zguiyang/pi-task-exec`
+- Subpath: `skills/pi-delegate`
+- Release ref: `v${packageVersion}` (an exact tag, never a silent fallback to
+  `main`)
+- Source-checkout/dev ref: the existing full commit
+  `f914707fa22fd658f50e059a5091440796ef39e0`
+
+`--host` is mandatory and selects the Skill Agent (`codex`, `zed`, or
+`opencode`); the agent is never guessed. `--scope project` installs under
+`<cwd>/.agents/skills/pi-delegate`, and `--scope global` under
+`<home>/.agents/skills/pi-delegate`. For the three supported agents the Skills
+CLI records the shared canonical `.agents/skills` location (not `~/.codex/skills`
+or `~/.config/opencode/skills`), and the project lockfile is `skills-lock.json`
+while the global lockfile is `$XDG_STATE_HOME/skills/.skill-lock.json` or
+`~/.agents/.skill-lock.json`.
+
+Plan generation is side-effect-free: it resolves the pinned argv and inspects
+every target path but never runs npm, the network, or writes a lockfile. The
+plan is always printed first. Before running the CLI the executor re-inspects
+the `.agents`, `skills`, install, and lock paths; an existing same-name skill,
+symlinked ancestor, non-directory target, or non-regular lock is displayed as a
+loss warning and requires a default-No confirmation that `--yes` cannot bypass.
+An unreadable path fails closed. The CLI runs with `child_process.spawn`
+(`shell: false`), passes `--agent`, the fixed source, scope, `--copy`, `--yes`,
+and `--json`, disables telemetry (`DO_NOT_TRACK=1`, `DISABLE_TELEMETRY=1`), and
+never prints environment values. On Windows the npm entry is launched through
+Node so no `.cmd` shim or shell is used.
+
+The wrapper verifies the real result beyond the exit code: `SKILL.md` and
+`references/mcp-contract.md` must exist, the installed bytes must match the
+bundled pinned source/ref content, and the lockfile must record the requested
+source and ref. A CLI exit code of `0` with missing files or a missing/invalid
+lockfile is reported as a failure. The Skills CLI install is **not** a
+transaction; no rollback is claimed or attempted.
 
 ## Environment variables
 
 | Environment variable | Used by | Purpose |
 | --- | --- | --- |
 | `PI_TASK_EXEC_LAUNCH_MODE` | launcher | Force `npm` or `checkout` launch mode instead of auto-detection |
+| `DO_NOT_TRACK`, `DISABLE_TELEMETRY` | Skill installer child | Set to `1` to disable Skills CLI telemetry |
+| `XDG_STATE_HOME` | Skill installer | Global Skills CLI lockfile base (default `~/.agents`) |
 | `CODEX_HOME` | Codex | User config directory (default `~/.codex`) |
 | `XDG_CONFIG_HOME` | Zed, OpenCode | Base config directory when the host-specific override is unset |
 | `APPDATA` | Zed (Windows) | Windows user config base for `Zed\settings.json` |
@@ -247,14 +305,15 @@ occupied at publication time.
 
 ## Current status and non-claims
 
-Phases 6–8 are implemented in this checkout. The following are **not**
-implemented and are **not** claimed:
+Phases 6–8 and stage 9A are implemented in this checkout. The following are
+**not** implemented and are **not** claimed:
 
 - the npm tarball has been generated locally, but the package has not been
   published and cannot currently be installed from npm; no MCP Registry record
   has been published;
-- stage 9 generic `.agents/skills/` installer has not started; skill operations
-  report pending/unavailable;
+- stage 9A implements only `add skill`; the combined `setup`/`update` flows and
+  `remove skill` remain deferred and report unsupported;
+- the Skills CLI install is not transactional and is not rolled back;
 - stage 10 tool migration has not started; the existing `pi_*` tools remain
   and migration to `task_*` is planned for that stage;
 - `doctor` is read-only and does not prove that a host configuration works;
@@ -269,7 +328,7 @@ output all live under the root.
 | Path | Responsibility |
 | --- | --- |
 | `bin/pi-task-exec.mjs` | Thin package launcher; only imports and calls `dist/cli/index.js`. No business implementation. |
-| `cli/` | CLI parser/router, commands, host install adapters (`cli/hosts/`), installer seam (`cli/installers/`), plan model and safety executor (`cli/plan/`), and CLI identity/IO. |
+| `cli/` | CLI parser/router, commands, host install adapters (`cli/hosts/`), installer seam and the pinned Skills CLI installer (`cli/installers/`), plan model and safety executor (`cli/plan/`), and CLI identity/IO. |
 | `mcp/` | MCP server entry, tools, workers, Pi RPC, and runtime. Does not import the CLI. |
 | `skills/pi-delegate/` | The `pi-delegate` delegation-policy Skill and its `references/`. Maintained by JoeyZhao in the `agent-skills` project. |
 | `tests/` | Unified tests under `tests/cli/`, `tests/mcp/`, `tests/hosts/`, and `tests/skills/`, with MCP fixtures under `tests/mcp/fixtures/`. |

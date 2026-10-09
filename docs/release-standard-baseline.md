@@ -28,8 +28,9 @@ Pi TaskExec v0.1.1.
 - The package ships the root build output (`dist/**`), including the MCP
   runtime (`dist/mcp/**`) and the CLI (`dist/cli/**`), plus the `pi-delegate`
   Skill (`skills/pi-delegate/**`). The CLI supports MCP `add`, `remove`,
-  `setup`, and `doctor`; Skill installation remains unavailable while stage 9
-  is paused.
+  `setup`, and `doctor`, plus `add skill`; the combined `setup`/`update` flows
+  and `remove skill` remain deferred. The package engine floor is Node
+  `>=22.20.0`, matching the pinned `skills@1.7.1` Skill installer.
 
 ## Host contract
 
@@ -49,8 +50,19 @@ higher precedence than its global configuration. All host entries must launch
 
 The standard MCP protocol specifies transport, not a common host configuration
 file or installation scope. Host adapters preserve each host's native format,
-scope locations, and trust rules. The `pi-delegate` Skill is distributed inside
-this package for the later installer stage but is not installed by v0.1.1.
+scope locations, and trust rules.
+
+## Skill distribution contract
+
+`pi-task-exec add skill --host <codex|zed|opencode> --scope <project|global>`
+installs `pi-delegate` through the pinned Vercel Skills CLI `skills@1.7.1` from
+the fixed GitHub source `https://github.com/zguiyang/pi-task-exec` (`skills/pi-delegate`
+subpath). The release ref is `v${packageVersion}`; source-checkout validation
+uses the full commit `f914707fa22fd658f50e059a5091440796ef39e0`. The CLI is
+always invoked with `shell: false`, explicit `--agent`/`--copy`/`--yes`/`--json`,
+and telemetry disabled. The job is only complete when the installed files and
+the lockfile record the requested source/ref; exit code alone is not accepted.
+The install is not transactional and no rollback is promised.
 
 ## Sources
 

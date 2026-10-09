@@ -16,7 +16,9 @@ import {
   type Scope,
 } from "../plan/model.js";
 import type { SkillInstaller } from "../installers/skill.js";
-import { executePlan, formatExecution, serializeExecution } from "../plan/executor.js";
+import { skillCliAdditionalRoots, type SkillsCliSpawn } from "../installers/skills-cli.js";
+import type { Interaction, InteractionChoice } from "../interactive.js";
+import { executePlan, formatExecution, serializeExecution, type SafetyConfirmation } from "../plan/executor.js";
 
 export { PACKAGE_NAME, PRODUCT_NAME, VERSION } from "../identity.js";
 export type { CliIo } from "../io.js";
@@ -32,6 +34,8 @@ export interface CliOptions {
   version: boolean;
   /** Explicit opt-in before writing an absolute local checkout launch path. */
   localDev: boolean;
+  /** Explicit opt-in to the interactive Agent/Scope/Yes-No flow. */
+  interactive: boolean;
 }
 
 export type ParsedCli =
@@ -40,6 +44,11 @@ export type ParsedCli =
   | { kind: "serve" }
   | { kind: "command"; operation: PlanOperation; target: PlanTarget; options: CliOptions }
   | { kind: "error"; code: string; message: string; json: boolean };
+
+/** Parsing mode. Interactive prompts are only reachable when a TTY/injected interaction exists. */
+export interface ParseOptions {
+  interactive?: boolean;
+}
 
 export interface CliDeps {
   io: CliIo;
@@ -53,9 +62,13 @@ export interface CliDeps {
   launchMode?: LaunchMode;
   adapters: readonly HostAdapter[];
   skillInstaller: SkillInstaller;
+  /** Injectable arrow-key interaction (Agent/Scope/Yes-No); absent without a TTY. */
+  interaction?: Interaction;
+  /** Injectable Skills CLI spawn for the pinned skill installer. */
+  skillSpawn?: SkillsCliSpawn;
   now: () => Date;
   spawn: SpawnFunction;
-  confirm?: (plan: import("../plan/model.js").InstallPlan) => Promise<boolean>;
+  confirm?: (plan: import("../plan/model.js").InstallPlan, safety?: SafetyConfirmation) => Promise<boolean>;
   roots?: readonly string[];
   backupDir?: string;
 }
@@ -68,7 +81,7 @@ const GLOBAL_HELP = `Usage:
 Commands:
   ${PRODUCT_NAME} mcp serve          Start the MCP stdio runtime (the only server-start command)
   ${PRODUCT_NAME} add mcp            Plan/install the MCP entry for an explicit host and scope
-  ${PRODUCT_NAME} add skill          Plan/install the pi-delegate skill for an explicit scope
+  ${PRODUCT_NAME} add skill          Plan/install the pi-delegate skill for an explicit host and scope
   ${PRODUCT_NAME} remove mcp         Plan/remove the MCP entry for an explicit host and scope
   ${PRODUCT_NAME} remove skill       Plan/remove the pi-delegate skill for an explicit scope
   ${PRODUCT_NAME} setup              Plan combined MCP and/or skill setup
@@ -79,8 +92,9 @@ Options:
   --version                          Print only the package version and exit
   --dry-run                          Print the plan and exit without writing
   --local-dev                        Explicitly allow installing an absolute source-checkout path (checkout mode only)
-  --json                             Print stable machine-readable JSON
+  --json                             Print stable machine-readable JSON (missing selections fail without prompting)
   --yes                              Skip confirmation only after the plan is printed
+  --interactive, -i                  Force prompting for missing selections (requires a TTY)
   --host <${KNOWN_HOST_IDS.join("|")}>
   --scope <project|global>
   --target <mcp|skill|both>          (setup only)
@@ -94,15 +108,15 @@ function commandHelp(topic: string): string {
     case "mcp serve":
       return `Usage:\n  ${PRODUCT_NAME} mcp serve\n\nStart the MCP stdio runtime. This is the only server-start command and the Registry launch contract.`;
     case "add mcp":
-      return `Usage:\n  ${PRODUCT_NAME} add mcp --host <${KNOWN_HOST_IDS.join("|")}> --scope <project|global> [--dry-run] [--json] [--yes]\n\nPlan and install the pi-task-exec MCP entry for an explicit host and scope. Host-specific paths and formats (Codex TOML, Zed/OpenCode JSONC) are merged safely; unrelated configuration is preserved and conflicts stop the whole operation.`;
+      return `Usage:\n  ${PRODUCT_NAME} add mcp [--host <${KNOWN_HOST_IDS.join("|")}>] [--scope <project|global>] [--dry-run] [--json] [--yes]\n\nPlan and install the pi-task-exec MCP entry. Host-specific paths and formats (Codex TOML, Zed/OpenCode JSONC) are merged safely; unrelated configuration is preserved and conflicts stop the whole operation. On a TTY a missing --host/--scope is prompted; --json fails instead of prompting.`;
     case "add skill":
-      return `Usage:\n  ${PRODUCT_NAME} add skill --scope <project|global> [--dry-run] [--json] [--yes]\n\nPlan and (when available) install the bundled pi-delegate skill. The generic installer is deferred to stage 9, so this currently reports unavailable and writes nothing.`;
+      return `Usage:\n  ${PRODUCT_NAME} add skill [--host <${KNOWN_HOST_IDS.join("|")}>] [--scope <project|global>] [--dry-run] [--json] [--yes]\n\nPlan and install the bundled pi-delegate Skill through the pinned Vercel Skills CLI v1.7.1 from the fixed GitHub source. --host selects the Skill Agent (prompted on a TTY when omitted). The plan is printed, existing paths require a default-No confirmation, and the real result (files, pinned source/ref, lockfile) is verified.`;
     case "remove mcp":
       return `Usage:\n  ${PRODUCT_NAME} remove mcp --host <${KNOWN_HOST_IDS.join("|")}> --scope <project|global> [--dry-run] [--json] [--yes]\n\nPlan and remove the pi-task-exec MCP entry for an explicit host and scope. Only an entry created by pi-task-exec (managed fingerprint) is removed; user entries are left untouched.`;
     case "remove skill":
       return `Usage:\n  ${PRODUCT_NAME} remove skill --scope <project|global> [--dry-run] [--json] [--yes]\n\nPlan and (when available) remove the managed pi-delegate skill.`;
     case "setup":
-      return `Usage:\n  ${PRODUCT_NAME} setup --target <mcp|skill|both> [--host <${KNOWN_HOST_IDS.join("|")}>] --scope <project|global> [--dry-run] [--json] [--yes]\n\nPlan combined setup. --host is required whenever --target includes mcp.`;
+      return `Usage:\n  ${PRODUCT_NAME} setup [--target <mcp|skill|both>] [--host <${KNOWN_HOST_IDS.join("|")}>] [--scope <project|global>] [--dry-run] [--json] [--yes]\n\nPlan the unified MCP + Skill setup in one plan (--target is an explicit override). On a TTY a missing Agent/Scope is prompted; --json fails instead of prompting. The MCP write and Skills CLI install run independently and report partial success.`;
     case "doctor":
       return `Usage:\n  ${PRODUCT_NAME} doctor [--json]\n\nRead-only check of Node, Pi, Git, package/platform/version contract, host adapter capability, and skill target status. Never prints config secrets or file contents.`;
     default:
@@ -126,9 +140,15 @@ function isTarget(value: string): value is PlanTarget {
   return value === "mcp" || value === "skill" || value === "both";
 }
 
-/** Pure argument parser. Unknown or malformed input always becomes an error. */
-export function parseCli(args: string[]): ParsedCli {
-  const options: CliOptions = { dryRun: false, yes: false, json: false, help: false, version: false, localDev: false };
+/**
+ * Pure argument parser. Unknown or malformed input always becomes an error.
+ * `setup` always defaults to MCP + Skill. With `interactive`, missing Agent or
+ * Scope selections are left unset so `runCommand` can prompt; otherwise they
+ * become explicit errors.
+ */
+export function parseCli(args: string[], parseOptions: ParseOptions = {}): ParsedCli {
+  const interactive = parseOptions.interactive === true;
+  const options: CliOptions = { dryRun: false, yes: false, json: false, help: false, version: false, localDev: false, interactive: false };
   const positionals: string[] = [];
   let sawToken = false;
 
@@ -161,6 +181,8 @@ export function parseCli(args: string[]): ParsedCli {
         options.dryRun = true;
       } else if (name === "--local-dev") {
         options.localDev = true;
+      } else if (name === "--interactive") {
+        options.interactive = true;
       } else if (name === "--yes") {
         options.yes = true;
       } else if (name === "--json") {
@@ -195,6 +217,11 @@ export function parseCli(args: string[]): ParsedCli {
       sawToken = true;
       continue;
     }
+    if (token === "-i") {
+      options.interactive = true;
+      sawToken = true;
+      continue;
+    }
     if (token.startsWith("-") && token.length > 1) {
       return errorResult("unknown_flag", `Unknown option: ${token}`, options.json);
     }
@@ -226,22 +253,32 @@ export function parseCli(args: string[]): ParsedCli {
     if (rest.length > 0) return unknown();
     if (second !== "mcp" && second !== "skill") return unknown();
     if (options.target !== undefined) return errorResult("unexpected_option", `--target is only valid for setup.`, options.json);
-    if (second === "mcp") {
-      if (options.host === undefined) return errorResult("missing_host", `${first} mcp requires an explicit --host ${KNOWN_HOST_IDS.join("|")}.`, options.json);
-      if (options.scope === undefined) return errorResult("missing_scope", `${first} mcp requires an explicit --scope project|global.`, options.json);
-    } else if (options.scope === undefined) {
-      return errorResult("missing_scope", `${first} skill requires an explicit --scope project|global.`, options.json);
+    // `remove` is never prompted, and the non-interactive mode keeps the exact
+    // missing-selection errors. `add mcp`/`add skill` leave them unset so the
+    // runtime can prompt for Agent/Scope.
+    if (first === "remove" || !interactive) {
+      if (second === "mcp") {
+        if (options.host === undefined) return errorResult("missing_host", `${first} mcp requires an explicit --host ${KNOWN_HOST_IDS.join("|")}.`, options.json);
+        if (options.scope === undefined) return errorResult("missing_scope", `${first} mcp requires an explicit --scope project|global.`, options.json);
+      } else {
+        if (options.scope === undefined) return errorResult("missing_scope", `${first} skill requires an explicit --scope project|global.`, options.json);
+        if (first === "add" && options.host === undefined) return errorResult("missing_host", `add skill requires an explicit --host ${KNOWN_HOST_IDS.join("|")} to select the Skill Agent.`, options.json);
+      }
     }
     return { kind: "command", operation: first, target: second, options };
   }
   if (first === "setup") {
     if (second !== undefined) return unknown();
-    if (options.target === undefined) return errorResult("missing_target", "setup requires --target mcp|skill|both.", options.json);
-    if ((options.target === "mcp" || options.target === "both") && options.host === undefined) {
-      return errorResult("missing_host", `setup --target ${options.target} requires an explicit --host ${KNOWN_HOST_IDS.join("|")}.`, options.json);
+    // `setup` is always the unified MCP + Skill plan; `--target` is only an
+    // explicit override. A missing --target is never an error.
+    const effectiveTarget = options.target ?? "both";
+    if (!interactive) {
+      if (effectiveTarget !== "skill" && options.host === undefined) {
+        return errorResult("missing_host", `setup requires an explicit --host ${KNOWN_HOST_IDS.join("|")}.`, options.json);
+      }
+      if (options.scope === undefined) return errorResult("missing_scope", "setup requires an explicit --scope project|global.", options.json);
     }
-    if (options.scope === undefined) return errorResult("missing_scope", `setup --target ${options.target} requires an explicit --scope project|global.`, options.json);
-    return { kind: "command", operation: "setup", target: options.target, options };
+    return { kind: "command", operation: "setup", target: effectiveTarget, options };
   }
   if (first === "doctor") {
     if (second !== undefined) return unknown();
@@ -279,8 +316,38 @@ function ensureDeps(deps: Partial<CliDeps> | undefined): CliDeps {
   } as CliDeps;
 }
 
+/**
+ * Compute the roots the executor may touch. This mirrors the non-interactive
+ * path: host env overrides are explicit roots, and the documented
+ * `XDG_STATE_HOME` global Skill lock override is an explicit root as well.
+ * Any Skill target outside these roots fails closed in the executor.
+ */
+function executionRoots(deps: CliDeps, host: string | undefined, scope: Scope | undefined, target: PlanTarget, context: HostContext): string[] {
+  const baseRoots = deps.roots ?? [deps.home, deps.cwd];
+  const extra: string[] = [];
+  const selectionAdapter = host !== undefined ? findAdapter(deps.adapters, host) : undefined;
+  if (selectionAdapter && scope !== undefined) extra.push(...selectionAdapter.additionalRoots(context, scope));
+  if ((target === "skill" || target === "both") && scope !== undefined) {
+    extra.push(...skillCliAdditionalRoots({ scope, env: deps.env }));
+  }
+  return [...baseRoots, ...extra];
+}
+
+const INTERACTIVE_HOSTS: readonly InteractionChoice<string>[] = KNOWN_HOST_IDS.map((id) => ({ value: id, label: id }));
+
+const INTERACTIVE_SCOPES: readonly InteractionChoice<Scope>[] = [
+  { value: "project", label: "project" },
+  { value: "global", label: "global" },
+];
+
+/**
+ * Run an add/setup command. When a required Agent/Scope/Target is missing and
+ * an injectable interaction is available, arrow-key prompts fill it in;
+ * `--json` never prompts and reports the exact missing-selection error instead.
+ * Cancellation at any prompt exits 0 with no filesystem changes.
+ */
 async function runCommand(parsed: Extract<ParsedCli, { kind: "command" }>, deps: CliDeps): Promise<CliAction> {
-  const { operation, target, options } = parsed;
+  const { operation, target: parsedTarget, options } = parsed;
   const context: HostContext = { home: deps.home, cwd: deps.cwd, platform: deps.platform, env: deps.env };
 
   if (operation === "doctor") {
@@ -297,6 +364,51 @@ async function runCommand(parsed: Extract<ParsedCli, { kind: "command" }>, deps:
     return { kind: "exit", code: 0 };
   }
 
+  const interaction = deps.interaction;
+  const canPrompt = interaction !== undefined && !options.json;
+  if (operation === "setup" && canPrompt) deps.io.stdout("Pi TaskExec Setup\n\n");
+  const cancelled = (): CliAction => {
+    deps.io.stdout("Cancelled: no changes were made.\n");
+    return { kind: "exit", code: 0 };
+  };
+  const missing = (code: string, message: string): CliAction => {
+    printError(deps.io, code, message, options.json);
+    return { kind: "exit", code: 1 };
+  };
+
+  // `setup` is always unified MCP + Skill; only Agent/Scope are prompted.
+  const target = parsedTarget;
+  let host = options.host;
+  let scope = options.scope;
+  const hostRequired = operation === "add" || (operation === "setup" && target !== "skill") || (operation === "remove" && target === "mcp");
+  const hostPromptable = hostRequired || operation === "setup";
+  if (host === undefined && hostPromptable) {
+    if (canPrompt) {
+      const chosen = await interaction.select("Which Agent?", INTERACTIVE_HOSTS, "codex");
+      if (chosen === null) return cancelled();
+      host = chosen;
+    } else if (hostRequired) {
+      return missing(
+        "missing_host",
+        operation === "add" && target === "skill"
+          ? `add skill requires an explicit --host ${KNOWN_HOST_IDS.join("|")} to select the Skill Agent.`
+          : `${operation} ${target} requires an explicit --host ${KNOWN_HOST_IDS.join("|")}.`,
+      );
+    }
+  }
+
+  // A unified `setup` keeps its `setup` operation; the installer accepts
+  // `setup` when an agent is present and stays deferred otherwise.
+  const planOperation: PlanOperation = operation;
+  if (scope === undefined) {
+    if (!canPrompt) {
+      return missing("missing_scope", `${operation}${operation === "setup" ? ` --target ${target}` : ""} requires an explicit --scope project|global.`);
+    }
+    const chosen = await interaction.select("Which scope?", INTERACTIVE_SCOPES, "project");
+    if (chosen === null) return cancelled();
+    scope = chosen;
+  }
+
   const { launch, mode: launchMode } = resolveLaunchSpec({
     packageRoot: deps.packageRoot,
     packageVersion: deps.packageVersion,
@@ -306,10 +418,10 @@ async function runCommand(parsed: Extract<ParsedCli, { kind: "command" }>, deps:
 
   const plan = await generatePlan(
     {
-      operation,
+      operation: planOperation,
       target,
-      ...(options.host !== undefined ? { host: options.host } : {}),
-      ...(options.scope !== undefined ? { scope: options.scope } : {}),
+      ...(host !== undefined ? { host } : {}),
+      ...(scope !== undefined ? { scope } : {}),
       dryRun: options.dryRun,
     },
     {
@@ -328,10 +440,13 @@ async function runCommand(parsed: Extract<ParsedCli, { kind: "command" }>, deps:
   // The plan is always printed before confirmation or any write.
   deps.io.stdout(options.json ? `${planJson(plan)}\n` : `${formatPlan(plan)}\n`);
 
-  const baseRoots = deps.roots ?? [deps.home, deps.cwd];
-  const selectionAdapter = options.host !== undefined ? findAdapter(deps.adapters, options.host) : undefined;
-  const extraRoots = selectionAdapter && options.scope !== undefined ? selectionAdapter.additionalRoots(context, options.scope) : [];
-  const roots = extraRoots.length > 0 ? [...baseRoots, ...extraRoots] : baseRoots;
+  const roots = executionRoots(deps, host, scope, target, context);
+  const confirm = interaction !== undefined
+    ? async (confirmPlan: import("../plan/model.js").InstallPlan, safety?: SafetyConfirmation): Promise<boolean> => {
+        if (safety) deps.io.stdout(`${safety.message}\n`);
+        return interaction.confirm(safety ? "Replace the listed path(s)?" : "Proceed with this plan?", false);
+      }
+    : deps.confirm;
 
   const result = await executePlan(plan, {
     roots,
@@ -339,17 +454,23 @@ async function runCommand(parsed: Extract<ParsedCli, { kind: "command" }>, deps:
     io: deps.io,
     yes: options.yes,
     ...(deps.backupDir !== undefined ? { backupDir: deps.backupDir } : {}),
-    ...(deps.confirm !== undefined ? { confirm: deps.confirm } : {}),
+    ...(confirm !== undefined ? { confirm } : {}),
     now: deps.now,
+    ...(deps.skillSpawn !== undefined ? { skillSpawn: deps.skillSpawn } : {}),
+    skillEnv: context.env,
+    skillHome: context.home,
+    skillPackageRoot: deps.packageRoot,
   });
 
   deps.io.stdout(options.json ? `${JSON.stringify(serializeExecution(result), null, 2)}\n` : `${formatExecution(result)}\n`);
+  if (result.status === "cancelled" && interaction !== undefined) return cancelled();
   const code = result.status === "success" || result.status === "no-op" || result.status === "dry-run" ? 0 : 1;
   return { kind: "exit", code };
 }
 
 export async function runCli(args: string[], depsInput?: Partial<CliDeps>): Promise<CliAction> {
-  const parsed = parseCli(args);
+  const interactive = depsInput?.interaction !== undefined || args.includes("--interactive") || args.includes("-i");
+  const parsed = parseCli(args, { interactive });
   try {
     const deps = ensureDeps(depsInput);
     switch (parsed.kind) {

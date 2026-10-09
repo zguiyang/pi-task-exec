@@ -290,9 +290,11 @@ test("MCP add/remove and setup require explicit host and scope", () => {
   const missing = [
     { args: ["add", "mcp"], code: "missing_host" },
     { args: ["add", "mcp", "--host", "codex"], code: "missing_scope" },
+    { args: ["add", "skill"], code: "missing_scope" },
+    { args: ["add", "skill", "--scope", "project"], code: "missing_host" },
     { args: ["remove", "mcp"], code: "missing_host" },
     { args: ["remove", "skill"], code: "missing_scope" },
-    { args: ["setup"], code: "missing_target" },
+    { args: ["setup"], code: "missing_host" },
     { args: ["setup", "--target", "mcp", "--scope", "project"], code: "missing_host" },
     { args: ["setup", "--target", "mcp", "--host", "codex"], code: "missing_scope" },
   ];
@@ -423,7 +425,7 @@ test("remove mcp with a fake adapter removes only the managed entry", async () =
 test("add skill with the unavailable installer reports pending without writing", async () => {
   const root = await makeRoot();
   const { deps, captured } = makeDeps(root, { skillInstaller: unavailableSkillInstaller() });
-  const action = await runCli(["add", "skill", "--scope", "project", "--yes", "--json"], deps);
+  const action = await runCli(["add", "skill", "--host", "codex", "--scope", "project", "--yes", "--json"], deps);
   assert.deepEqual(action, { kind: "exit", code: 1 });
   assert.match(captured.stdout(), /skill_installer_unavailable/);
   await assert.rejects(readFile(join(deps.cwd, ".agents", "skills", "pi-delegate", "SKILL.md"), "utf8"));

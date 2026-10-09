@@ -1,4 +1,5 @@
 import type { HostAdapter } from "../hosts/adapters.js";
+import { dirname } from "node:path";
 import type { CliIo } from "../io.js";
 import { MANAGED_BY, type InstallPlan, type PlannedRemoval, type PlannedWrite } from "./model.js";
 import {
@@ -11,12 +12,38 @@ import {
   restoreBackup,
   snapshotFile,
 } from "./safety.js";
+import {
+  SKILL_CLI_TIMEOUT_MS,
+  inspectSkillCliPaths,
+  skillsCliSpawnEnv,
+  spawnSkillsCli,
+  verifySkillsCliInstall,
+  type SkillCliPathInspection,
+  type SkillsCliSpawn,
+} from "../installers/skills-cli.js";
+import type { SkillCliPlan } from "../installers/skill.js";
 
-export type ExecutionStatus = "dry-run" | "success" | "no-op" | "unsupported" | "conflict" | "cancelled" | "failed";
+export type ExecutionStatus = "dry-run" | "success" | "no-op" | "unsupported" | "conflict" | "cancelled" | "failed" | "partial";
 
 export interface ExecutionError {
   code: string;
   message: string;
+}
+
+/**
+ * Independent result for one target of a combined plan. A combined
+ * MCP + Skills CLI plan runs each target separately so a failure in one part
+ * never discards the other part's successful mutations.
+ */
+export interface ExecutionPart {
+  target: "mcp" | "skill";
+  status: ExecutionStatus;
+  performed: string[];
+  removed: string[];
+  backups: Array<{ path: string; backupPath: string | null }>;
+  errors: ExecutionError[];
+  rollback: "none" | "restored" | "skipped";
+  warnings: string[];
 }
 
 export interface ExecutionResult {
@@ -27,6 +54,13 @@ export interface ExecutionResult {
   errors: ExecutionError[];
   rollback: "none" | "restored" | "skipped";
   warnings: string[];
+  /** Per-target results. Populated for combined plans and for the active target. */
+  parts: ExecutionPart[];
+}
+
+export interface SafetyConfirmation {
+  reason: "skill-path-safety";
+  message: string;
 }
 
 export interface ExecutorOptions {
@@ -36,11 +70,22 @@ export interface ExecutorOptions {
   adapters: readonly HostAdapter[];
   io: CliIo;
   yes: boolean;
-  /** Interactive confirmation; only consulted when `yes` is false. */
-  confirm?: (plan: InstallPlan) => Promise<boolean>;
+  /** Interactive confirmation; only consulted when `yes` is false, or when a
+   * path-safety finding requires a default-No confirmation that `yes` cannot
+   * bypass. */
+  confirm?: (plan: InstallPlan, safety?: SafetyConfirmation) => Promise<boolean>;
   now?: () => Date;
   /** Test hook invoked after each successful write. */
   afterWrite?: (path: string, index: number) => Promise<void>;
+  /** Injectable Skills CLI spawn; defaults to a structural shell-free spawn. */
+  skillSpawn?: SkillsCliSpawn;
+  /** Environment for the Skills CLI child (values are never printed). */
+  skillEnv?: NodeJS.ProcessEnv;
+  /** HOME/USERPROFILE override so the CLI resolves the injected home. */
+  skillHome?: string;
+  /** Package root holding the bundled skills/pi-delegate reference bytes. */
+  skillPackageRoot?: string;
+  skillTimeoutMs?: number;
 }
 
 function adaptersFor(adapters: readonly HostAdapter[], host: string | undefined): HostAdapter | undefined {
@@ -241,26 +286,196 @@ async function rollbackJournal(journal: readonly JournalEntry[], options: Execut
   return { rollback: skipped ? "skipped" : rolledBack ? "restored" : "none", warnings };
 }
 
-/**
- * Execute a generated plan. Dry-run and real execution share the same plan
- * generator; this function revalidates every base hash before confirmation and
- * again immediately before every write/removal, and rolls back all mutations
- * on any later failure.
- */
-export async function executePlan(plan: InstallPlan, options: ExecutorOptions): Promise<ExecutionResult> {
-  const base: ExecutionResult = {
-    status: "success",
-    performed: [],
-    removed: [],
-    backups: [],
-    errors: [],
-    rollback: "none",
-    warnings: [],
-  };
+function emptyResult(status: ExecutionStatus): ExecutionResult {
+  return { status, performed: [], removed: [], backups: [], errors: [], rollback: "none", warnings: [], parts: [] };
+}
 
-  if (plan.dryRun) return { ...base, status: "dry-run" };
-  if (plan.conflicts.length > 0) return { ...base, status: "conflict" };
-  if (plan.unsupported.length > 0) return { ...base, status: "unsupported" };
+function partOf(target: "mcp" | "skill", result: ExecutionResult): ExecutionPart {
+  return {
+    target,
+    status: result.status,
+    performed: [...result.performed],
+    removed: [...result.removed],
+    backups: [...result.backups],
+    errors: [...result.errors],
+    rollback: result.rollback,
+    warnings: [...result.warnings],
+  };
+}
+
+function unsupportedResult(capabilities: readonly { code: string; message: string }[]): ExecutionResult {
+  return {
+    ...emptyResult("unsupported"),
+    errors: capabilities.map((capability) => ({ code: capability.code, message: capability.message })),
+  };
+}
+
+function isSuccessStatus(status: ExecutionStatus): boolean {
+  return status === "success" || status === "no-op" || status === "dry-run";
+}
+
+function combineParts(parts: readonly ExecutionPart[]): ExecutionResult {
+  const performed = parts.flatMap((part) => part.performed);
+  const removed = parts.flatMap((part) => part.removed);
+  const backups = parts.flatMap((part) => part.backups);
+  const errors = parts.flatMap((part) => part.errors);
+  const warnings = parts.flatMap((part) => part.warnings);
+  const rollback = parts.some((part) => part.rollback === "restored")
+    ? "restored"
+    : parts.some((part) => part.rollback === "skipped")
+      ? "skipped"
+      : "none";
+  const successes = parts.filter((part) => isSuccessStatus(part.status));
+  const failures = parts.filter((part) => !isSuccessStatus(part.status));
+  let status: ExecutionStatus;
+  if (failures.length === 0) {
+    status = performed.length > 0 || removed.length > 0 ? "success" : "no-op";
+  } else if (successes.length > 0) {
+    status = "partial";
+  } else if (failures.some((part) => part.status === "failed")) {
+    status = "failed";
+  } else if (failures.some((part) => part.status === "conflict")) {
+    status = "conflict";
+  } else if (failures.some((part) => part.status === "unsupported")) {
+    status = "unsupported";
+  } else if (failures.some((part) => part.status === "cancelled")) {
+    status = "cancelled";
+  } else if (failures.some((part) => part.status === "dry-run")) {
+    status = "dry-run";
+  } else {
+    status = "no-op";
+  }
+  return { status, performed, removed, backups, errors, rollback, warnings, parts: [...parts] };
+}
+
+function inspectionSignature(inspection: SkillCliPathInspection): string {
+  if (inspection.fatal) return `fatal:${inspection.fatal.code}:${inspection.fatal.message}`;
+  return inspection.findings
+    .map((item) => `${item.kind}:${item.path}`)
+    .sort()
+    .join("|");
+}
+
+/**
+ * Execute the pinned Skills CLI after the same preflight/confirmation seam as
+ * config writes. The CLI install is intentionally not treated as atomic: no
+ * rollback is attempted and the caller is warned.
+ */
+async function executeSkillCli(plan: InstallPlan, cli: SkillCliPlan, options: ExecutorOptions): Promise<ExecutionResult> {
+  const base: ExecutionResult = emptyResult("success");
+
+  // The Skills CLI is a third-party process that writes outside the plan/executor
+  // seam. Assert every target it may touch is inside the explicitly allowed
+  // roots before any inspection, confirmation, or spawn. `assertPathWithinRoots`
+  // resolves the nearest existing ancestor, so a symlinked ancestor that
+  // redirects outside the roots fails closed with `symlink_escape`.
+  for (const target of [cli.installDir, cli.lockFile]) {
+    try {
+      await assertPathWithinRoots(target, { roots: options.roots });
+    } catch (error) {
+      if (error instanceof SafetyError) {
+        return { ...base, status: "conflict", errors: [{ code: error.code, message: error.message }] };
+      }
+      throw error;
+    }
+  }
+
+  const skillsRoot = dirname(cli.installDir);
+  const agentsDir = dirname(skillsRoot);
+  const inspect = (): Promise<SkillCliPathInspection> => inspectSkillCliPaths({ agentsDir, skillsRoot, installDir: cli.installDir, lockFile: cli.lockFile });
+  const inspection = await inspect();
+  if (inspection.fatal) {
+    return { ...base, status: "conflict", errors: [{ code: inspection.fatal.code, message: inspection.fatal.message }] };
+  }
+  const initialSignature = inspectionSignature(inspection);
+
+  // The plan's safety findings are conservative if paths changed since
+  // planning; current findings below determine whether execution can continue.
+  const findings = inspection.findings.length > 0 ? inspection.findings : cli.safety;
+  // Only an ordinary, existing same-name skill directory can be replaced with
+  // explicit consent. Symlinks, non-directory targets, and lock conflicts are
+  // unsafe regardless of `--yes` or an affirmative prompt: the third-party CLI
+  // must never be allowed to follow or replace those paths.
+  const unsafe = findings.filter((item) => item.kind !== "existing-skill");
+  if (unsafe.length > 0) {
+    return {
+      ...base,
+      status: "conflict",
+      errors: [{
+        code: "unsafe_skill_path",
+        message: `Refusing to run the Skills CLI for unsafe target paths:\n${unsafe.map((item) => `  - ${item.path} (${item.kind})`).join("\n")}`,
+      }],
+    };
+  }
+  const replacement = findings.some((item) => item.kind === "existing-skill");
+  if (!options.yes || replacement) {
+    if (!options.confirm) return { ...base, status: "cancelled" };
+    const safety: SafetyConfirmation | undefined = replacement
+      ? {
+          reason: "skill-path-safety",
+          message: `The Skills CLI would replace existing skill directories:\n${findings.filter((item) => item.kind === "existing-skill").map((item) => `  - ${item.path} (existing-skill)`).join("\n")}`,
+        }
+      : undefined;
+    const confirmed = await options.confirm(plan, safety);
+    if (!confirmed) return { ...base, status: "cancelled" };
+  }
+
+  // Re-inspect immediately after confirmation. A target created, removed, or
+  // swapped during the prompt changes the safety findings; refuse to run the
+  // CLI so no third-party process can act on a drifted path.
+  const afterConfirmation = await inspect();
+  if (afterConfirmation.fatal) {
+    return { ...base, status: "conflict", errors: [{ code: afterConfirmation.fatal.code, message: afterConfirmation.fatal.message }] };
+  }
+  if (inspectionSignature(afterConfirmation) !== initialSignature) {
+    return {
+      ...base,
+      status: "conflict",
+      errors: [{ code: "skill_targets_changed", message: "The skill target paths changed during confirmation; refusing to run the Skills CLI." }],
+    };
+  }
+
+  const spawn = options.skillSpawn ?? spawnSkillsCli;
+  const env = skillsCliSpawnEnv(options.skillEnv ?? {}, options.skillHome ?? cli.home);
+  const result = await spawn(cli.command, [...cli.args, "--yes"], {
+    // Add Skills CLI's non-interactive confirmation only after the plan has
+    // been explicitly accepted (or `--yes` accepted the printed plan).
+    // The plan itself never carries this flag.
+    //
+    // The leading `npx -y` is only npm's package-install prompt. Keep argv as
+    // an array; no shell interpolation is used.
+    cwd: cli.cwd,
+    env,
+    timeoutMs: options.skillTimeoutMs ?? SKILL_CLI_TIMEOUT_MS,
+  });
+  const verification = await verifySkillsCliInstall({
+    cli,
+    exitCode: result.code,
+    ...(result.error !== undefined ? { spawnError: result.error } : {}),
+    ...(result.timedOut !== undefined ? { timedOut: result.timedOut } : {}),
+    stdout: result.stdout,
+    stderr: result.stderr,
+    packageRoot: options.skillPackageRoot ?? "",
+    env,
+  });
+  if (!verification.ok) {
+    return {
+      ...base,
+      status: "failed",
+      errors: verification.errors.map((message) => ({ code: "skill_cli_verification_failed", message })),
+      warnings: [...verification.warnings],
+    };
+  }
+  return { ...base, status: "success", performed: [cli.installDir], warnings: [...verification.warnings] };
+}
+
+/**
+ * Apply the config/file part of a plan (MCP entry writes plus any legacy
+ * atomic skill-file writes). Extracted so a combined plan can run this target
+ * independently from the Skills CLI.
+ */
+async function executeConfigWrites(plan: InstallPlan, options: ExecutorOptions): Promise<ExecutionResult> {
+  const base: ExecutionResult = emptyResult("success");
 
   const writes = [...plan.creates, ...plan.updates];
   if (writes.length === 0 && plan.removals.length === 0) return { ...base, status: "no-op" };
@@ -364,17 +579,79 @@ export async function executePlan(plan: InstallPlan, options: ExecutorOptions): 
   };
 }
 
+/**
+ * Execute a generated plan. Dry-run and real execution share the same plan
+ * generator; this function revalidates every base hash before confirmation and
+ * again immediately before every write/removal, and rolls back all mutations
+ * on any later failure.
+ *
+ * A plan that installs both a config target (MCP entry) and the Skills CLI
+ * runs the two targets independently: each gets its own status, performed
+ * paths, errors, and warnings, and the combined status is `partial` when one
+ * succeeds and the other does not. A failure in one target never discards the
+ * other target's successful mutations.
+ */
+export async function executePlan(plan: InstallPlan, options: ExecutorOptions): Promise<ExecutionResult> {
+  if (plan.dryRun) return emptyResult("dry-run");
+  if (plan.conflicts.length > 0) return emptyResult("conflict");
+
+  const skillCli = plan.skillCli;
+  const hasConfigWrites = plan.creates.length + plan.updates.length + plan.removals.length > 0;
+  const mcpUnsupported = plan.unsupported.filter((item) => item.target === "mcp");
+  const skillUnsupported = plan.unsupported.filter((item) => item.target === "skill");
+
+  // Combined MCP/config + Skills CLI plan: run both targets independently and
+  // preserve partial success. This runs even when MCP has no writes (already
+  // configured) so the MCP no-op is reported next to the Skill outcome and a
+  // failed Skill cannot hide the actual MCP state. The plan is confirmed once
+  // here; the two parts then run without a second plan prompt. The Skills CLI
+  // path-safety confirmation still fires on its own and `--yes` still cannot
+  // bypass it.
+  if (plan.target === "both" && skillCli) {
+    if (!options.yes) {
+      if (!options.confirm) return combineParts([partOf("mcp", emptyResult("cancelled")), partOf("skill", emptyResult("cancelled"))]);
+      const confirmed = await options.confirm(plan);
+      if (!confirmed) return combineParts([partOf("mcp", emptyResult("cancelled")), partOf("skill", emptyResult("cancelled"))]);
+    }
+    const partOptions: ExecutorOptions = { ...options, yes: true };
+    const configResult =
+      mcpUnsupported.length > 0
+        ? unsupportedResult(mcpUnsupported)
+        : hasConfigWrites
+          ? await executeConfigWrites(plan, partOptions)
+          : { ...emptyResult("no-op"), warnings: ["No MCP changes were planned."] };
+    const skillResult = skillUnsupported.length > 0 ? unsupportedResult(skillUnsupported) : await executeSkillCli(plan, skillCli, partOptions);
+    return combineParts([partOf("mcp", configResult), partOf("skill", skillResult)]);
+  }
+
+  if (plan.unsupported.length > 0) return unsupportedResult(plan.unsupported);
+  if (skillCli) return executeSkillCli(plan, skillCli, options);
+  return executeConfigWrites(plan, options);
+}
+
 export { MANAGED_BY };
 
 export function serializeExecution(result: ExecutionResult): Record<string, unknown> {
+  const sortBackups = (backups: ReadonlyArray<{ path: string; backupPath: string | null }>) =>
+    [...backups].sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
   return {
     status: result.status,
     performed: [...result.performed].sort(),
     removed: [...result.removed].sort(),
-    backups: [...result.backups].sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0)),
+    backups: sortBackups(result.backups),
     rollback: result.rollback,
     errors: result.errors.map((error) => ({ code: error.code, message: error.message })),
     warnings: [...result.warnings].sort(),
+    parts: result.parts.map((part) => ({
+      target: part.target,
+      status: part.status,
+      performed: [...part.performed].sort(),
+      removed: [...part.removed].sort(),
+      backups: sortBackups(part.backups),
+      rollback: part.rollback,
+      errors: part.errors.map((error) => ({ code: error.code, message: error.message })),
+      warnings: [...part.warnings].sort(),
+    })),
   };
 }
 
@@ -390,6 +667,9 @@ export function formatExecution(result: ExecutionResult): string {
   section("Backups", result.backups.map((item) => `${item.path} -> ${item.backupPath ?? "(created file, no backup)"}`));
   section("Errors", result.errors.map((error) => `${error.code}: ${error.message}`));
   section("Warnings", result.warnings);
+  if (result.parts.length > 1) {
+    section("Parts", result.parts.map((part) => `${part.target}: ${part.status}`));
+  }
   lines.push(`Rollback: ${result.rollback}`);
   return lines.join("\n");
 }
