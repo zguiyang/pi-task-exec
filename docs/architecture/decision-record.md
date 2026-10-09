@@ -1,6 +1,6 @@
 # Pi TaskExec 架构决策记录
 
-状态：审查建议，待 Supervisor 接受
+状态：架构决策历史记录；阶段 6 的 CLI 与产品标识实现由 2026-10-09 用户授权
 日期：2026-10-08
 范围：架构与实施决策；本记录不授权修改运行时代码、Git、npm 或 MCP Registry。
 
@@ -28,6 +28,8 @@ Pi TaskExec 是供主 Agent 调用的 MCP 调度、连接和执行控制层，�
 发布身份在阶段 1 已确认：`gh api user` 为 `zguiyang`，`gh repo view` 显示仓库为 PUBLIC 且当前账号为 ADMIN；`npm whoami` 为 `zhaoguiyang`，`npm org ls zguiyang` 显示该账号为 owner。尚未实际执行 Registry OAuth/OIDC 发布；未来 OIDC 发布工作流需要 `id-token: write` 权限。
 
 ## 3. npm 与 MCP Registry
+
+迁移历史说明：本节中提到的旧 CLI alias 仅记录新产品身份替换旧身份的决定。
 
 - 使用单一根 npm 包；`package.json`、`package-lock.json` 位于仓库根目录。名称取 `@zguiyang/pi-task-exec`，bin 仅提供 `pi-task-exec`，不提供旧 `pi-worker-mcp` alias。
 - 包名和 Registry server name 不要求相同。根 `package.json` 的 `name` 与 `server.json.packages[].identifier` 必须分别填入 npm 包名；根 `package.json.mcpName` 必须精确匹配 `server.json.name`，即 `io.github.zguiyang/pi-task-exec`。
@@ -70,6 +72,8 @@ Pi TaskExec 是供主 Agent 调用的 MCP 调度、连接和执行控制层，�
 `prepack` 可构建 `mcp/dist/`；`files` 需包含 Skill 原目录。`dist/` 作为生成物由 build/prepack 生成；当前迁入的 `dist/` 不在本阶段删除。根包不增加 `main`/`exports`，除非明确决定对外支持程序化导入 API。
 
 ## 5. CLI 决策
+
+迁移历史说明：本节提到的旧 CLI 命令与旧配置 key，仅用于记录退役范围。
 
 完全退役旧 CLI 名称，不保留旧 bin、alias、wrapper、旧包名安装命令或 deprecated 过渡代码。新 CLI 命令为：
 

@@ -2,16 +2,16 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import * as z from "zod/v4";
-import { runCli } from "./cli.js";
+import { PRODUCT_NAME, VERSION, runCli } from "./cli.js";
 import { WorkerManager } from "./worker-manager.js";
 
-const cliResult = await runCli(process.argv.slice(2));
-if (cliResult !== -1) {
-  process.exitCode = cliResult;
+const cliAction = runCli(process.argv.slice(2));
+if (cliAction.kind === "exit") {
+  process.exitCode = cliAction.code;
 } else {
 const manager = new WorkerManager();
 const server = new McpServer(
-  { name: "pi-worker-mcp", version: "0.1.1" },
+  { name: PRODUCT_NAME, version: VERSION },
   {
     instructions:
       "Pi workers are subordinate coding workers. The supervisor owns planning, architecture, delegation and integration decisions, and final review. Delegate bounded work when it saves context or enables useful parallel progress; keep trivial or ambiguous work and architectural decisions yourself. Use multiple workers only for independent tasks, never recursively delegate, and review worker output before accepting it.",
@@ -124,10 +124,10 @@ server.registerTool(
   async () => ok(manager.list()),
 );
 
-console.error("pi-worker-mcp started over MCP stdio");
+console.error(`${PRODUCT_NAME} started over MCP stdio`);
 
 let shutdownPromise: Promise<void> | undefined;
-const stdio = serveStdio(() => server, { onerror: (error) => console.error("pi-worker-mcp transport error:", error) });
+const stdio = serveStdio(() => server, { onerror: (error) => console.error(`${PRODUCT_NAME} transport error:`, error) });
 function shutdown(): Promise<void> {
   shutdownPromise ??= (async () => {
     try {
@@ -135,7 +135,7 @@ function shutdown(): Promise<void> {
     } finally {
       await stdio.close();
     }
-  })().catch((error) => { console.error("pi-worker-mcp shutdown error:", error); });
+  })().catch((error) => { console.error(`${PRODUCT_NAME} shutdown error:`, error); });
   return shutdownPromise;
 }
 

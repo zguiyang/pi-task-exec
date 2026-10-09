@@ -1,50 +1,73 @@
 # Pi TaskExec
 
-Pi TaskExec is a planned MCP orchestration and control layer between a main
-Agent (the Supervisor) and a local Pi execution layer. It is not an
-independent agent. The Supervisor keeps requirement interpretation,
-architecture and risk decisions, authorization, task decomposition,
-integration, review, and final acceptance; Pi TaskExec is intended to create,
-connect to, and supervise bounded Pi workers and return structured status and
-results for independent verification.
+Pi TaskExec is an MCP orchestration and control layer between a main Agent (the
+Supervisor) and a local Pi execution layer. It is not an independent agent. The
+Supervisor keeps requirement interpretation, architecture and risk decisions,
+authorization, task decomposition, integration, review, and final acceptance;
+Pi TaskExec creates, connects to, and supervises bounded Pi workers and returns
+structured status and results for independent verification.
 
-The intended core flow is: Supervisor → Pi TaskExec MCP → Pi Worker →
-structured status/result → Supervisor review and acceptance.
-`inspect`/`implement` are tool capability profiles and `direct`/`worktree` are
-working-directory modes; neither is an operating-system security sandbox.
+The core flow is: Supervisor → Pi TaskExec MCP → Pi Worker → structured
+status/result → Supervisor review and acceptance. `inspect`/`implement` are
+tool capability profiles and `direct`/`worktree` are working-directory modes;
+neither is an operating-system security sandbox.
 
-> Status: Phase 3 (root `package.json`, lockfile, and `server.json`
-> integration) has been prepared in this checkout. The integrated root package
-> has not been built or tested and no release has occurred; the `mcp/dist/`
-> files already present are migrated module build artifacts, not an
-> integrated-root-package build.
+> Status: Phase 6 (old CLI and old product-identifier cleanup) plus the
+> authorized CLI routing work have been implemented in this checkout at version
+> `0.1.1`. The changes await Supervisor review; the dry-run package manifest was
+> verified, but nothing has been published. `mcp/dist/` is generated build
+> output from `mcp/src/`.
+
+## CLI surface
+
+The only real CLI behaviors in this build are:
+
+| Command | Behavior |
+| --- | --- |
+| `pi-task-exec` (no arguments) | Prints help and exits `0` without starting MCP. |
+| `pi-task-exec --help` | Prints help and exits `0`. |
+| `pi-task-exec --version` | Prints `0.1.1` and exits `0`. |
+| `pi-task-exec mcp serve` | Starts the existing MCP stdio runtime. |
+
+`mcp serve` is the single service-start contract used by Host configuration and
+the MCP Registry entry. All six MCP tools (`pi_spawn`, `pi_status`,
+`pi_steer`, `pi_continue`, `pi_abort`, `pi_list`) are preserved.
+
+The following commands are authorized for a later stage. They print a clear
+future-stage notice, change no files, and exit `1`; they never fall back to the
+previous CLI behavior:
+
+- `pi-task-exec add mcp`
+- `pi-task-exec add skill`
+- `pi-task-exec setup`
+- `pi-task-exec doctor`
+- `pi-task-exec remove mcp`
+- `pi-task-exec remove skill`
+
+Any other input, including the removed top-level `serve`, `version`, `update`,
+and `uninstall` routes, reports `Unknown command` plus help and exits `1`.
 
 ## Current status and non-claims
 
-The currently authorized scope adds Phase 3 (root `package.json` and lockfile
-integration) to the Phase 2 repository foundation files, the root `.gitignore`,
-the root license, and Git initialization. Phase 3 is prepared but not yet
-accepted by the Supervisor.
+Phase 6 is implemented in this checkout and awaits Supervisor review. The
+following are **not** implemented and are **not** claimed:
 
-The following are **not** implemented and are **not** claimed by this
-repository state:
-
-- no npm packaging or publication;
-- no `pi-task-exec` CLI behavior, installer, `setup`, or `doctor`;
+- no npm packaging or publication, and no MCP Registry record;
+- no host or skill installer; `add`, `setup`, `doctor`, and `remove` only print
+  future-stage notices;
 - no cross-platform host support or verified installation paths;
-- no MCP Registry record, release, or version compatibility promise.
+- no release or version compatibility promise.
 
-## Provisional names
+## Product identity
 
-These are target names. The Phase 1 checks below describe the current state
-only; they do not reserve the npm package name or the MCP Registry ID.
-
-| Purpose | Provisional name |
+| Purpose | Name |
 | --- | --- |
+| Product | Pi TaskExec |
 | npm package | `@zguiyang/pi-task-exec` |
-| CLI (planned, not implemented) | `pi-task-exec` |
-| MCP Registry ID (planned, not registered) | `io.github.zguiyang/pi-task-exec` |
-| Skill (present in this repository) | `pi-delegate` |
+| CLI / `bin` | `pi-task-exec` |
+| MCP Registry ID | `io.github.zguiyang/pi-task-exec` |
+| MCP server name | `pi-task-exec` |
+| Skill | `pi-delegate` |
 
 Phase 1 (2026-10-08) resolved the naming, identity, and Skill-licensing
 questions with the following evidence:
@@ -65,17 +88,17 @@ questions with the following evidence:
   redistribution, and that no separate NOTICE is required.
 
 Neither the npm package nor any MCP Registry record has been published yet.
-Actual Registry OAuth/OIDC publishing was not attempted; that future workflow
-will require the `id-token: write` permission. The checks above are evidence
-of the current state, not a release commitment, and the project must still
-stop rather than fall back to an old name if the target Registry ID is
+Actual Registry OAuth/OIDC publishing has not been attempted; that future
+workflow will require the `id-token: write` permission. The checks above are
+evidence of the current state, not a release commitment, and the project must
+still stop rather than fall back to an old name if the target Registry ID is
 occupied at publication time.
 
 ## Repository layout and responsibilities
 
 | Path | Responsibility |
 | --- | --- |
-| `mcp/` | MCP worker runtime source (`mcp/src/`), tests (`mcp/tests/`), build config, and module docs. Migrated from the `pi-worker-mcp` project. |
+| `mcp/` | MCP worker runtime source (`mcp/src/`), tests (`mcp/tests/`), build config, and module docs. |
 | `skills/pi-delegate/` | The `pi-delegate` delegation-policy Skill and its `references/`. Maintained by JoeyZhao in the `agent-skills` project. |
 | `docs/architecture/` | Architecture decision record, implementation plan, and risk register for the migration. |
 | `README.md` | This overview. |
@@ -83,22 +106,20 @@ occupied at publication time.
 | `.gitignore` | Root ignore rules. |
 
 `mcp/dist/` is generated build output from `mcp/src/` and is intentionally not
-tracked. The root `package.json`, `package-lock.json`, and `server.json` now
-exist for the interim integration; the integrated build and release flow is not
-yet verified.
+tracked. The root `package.json`, `package-lock.json`, and `server.json` carry
+the new identity. Phase 6 CLI routing and the integrated test suite are
+verified; npm packaging and publication remain pending.
 
-## Migration and development status
+## Migration history
 
-This checkout is being assembled as a single repository from two existing
-sources. Migration is in an early, authorized-phase state:
+This checkout was assembled from two earlier sources. The historical project
+names in this section are recorded only as migration provenance; they are not
+current product names and must not appear in runtime code, current installation
+instructions, or package metadata.
 
-- **Phase 3 (current):** Root `package.json`, lockfile, and `server.json`
-  integration, with build/typecheck/test scripts pointing at `mcp/tsconfig.json`
-  and `mcp/tests/*.test.mjs`. Phase 2 repository base files remain in place.
-- Later phases (Skill packaging, old-name cleanup, CLI implementation,
-  multi-platform installers, contract synchronization, CI, tarball acceptance,
-  npm/Registry publication, and finally source retirement) are planned but not
-  started or not authorized in this checkout.
+- The `mcp/` module was migrated from the `pi-worker-mcp` project.
+- The `pi-delegate` Skill is maintained by JoeyZhao in the `agent-skills`
+  project.
 
 **Both old projects remain.** The previous repositories and their local
 checkouts are not retired, renamed, or deleted. They are only to be retired as
@@ -106,14 +127,35 @@ the final migration step, after the new project is published and publicly
 accepted, following the order and gates recorded in
 [`docs/architecture/implementation-plan.md`](docs/architecture/implementation-plan.md).
 
-## Source attribution
-
-- `mcp/` is migrated from the `pi-worker-mcp` project.
-- The `skills/pi-delegate/` Skill is maintained by JoeyZhao in the
-  `agent-skills` project.
-
 This repository does not use the old repositories' Git history; it was
 initialized fresh in this checkout.
+
+## Installation
+
+There is no published package and no supported installation route yet. Until a
+host installer command is implemented, register the MCP with a stdio client
+using the launch contract:
+
+```text
+command: npx
+args:    -y @zguiyang/pi-task-exec@0.1.1 mcp serve
+```
+
+`setup`, `doctor`, `add`, and `remove` are not implemented; do not rely on any
+command described in planning documents.
+
+## Development from source
+
+```sh
+npm install
+npm run build
+npm test
+node mcp/dist/index.js mcp serve
+```
+
+`npm test` builds `mcp/src` and then runs the tests under `mcp/tests/`. For
+release-equivalent testing, use `npm pack` and execute the resulting `.tgz`
+from a clean temporary directory; `npm link` is not package acceptance.
 
 ## Licensing
 
@@ -123,10 +165,3 @@ with copyright held by `zguiyang`.
 [`mcp/LICENSE`](mcp/LICENSE) is preserved as the module-origin license for the
 MCP module and remains in effect for that module under the same MIT terms.
 There is no separate `NOTICE` file; none is required for the current scope.
-
-## Installation
-
-Installation is future work. There is no published package and no supported
-installation route yet. `setup`, `doctor`, and package installation commands
-are not implemented; do not rely on any command described in planning
-documents.

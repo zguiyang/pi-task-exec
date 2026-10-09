@@ -1,23 +1,34 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.zguiyang/pi-worker-mcp",
-  "title": "Pi Worker MCP",
+  "name": "io.github.zguiyang/pi-task-exec",
+  "title": "Pi TaskExec",
   "description": "A host-agnostic MCP worker runtime for supervising local Pi coding-agent processes.",
   "version": "0.1.1",
-  "websiteUrl": "https://github.com/zguiyang/pi-worker-mcp",
+  "websiteUrl": "https://github.com/zguiyang/pi-task-exec",
   "repository": {
-    "url": "https://github.com/zguiyang/pi-worker-mcp",
-    "source": "github"
+    "url": "https://github.com/zguiyang/pi-task-exec",
+    "source": "github",
+    "subfolder": "mcp"
   },
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
-      "identifier": "@zguiyang/pi-worker-mcp",
+      "identifier": "@zguiyang/pi-task-exec",
       "version": "0.1.1",
       "transport": {
         "type": "stdio"
-      }
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp"
+        },
+        {
+          "type": "positional",
+          "value": "serve"
+        }
+      ]
     }
   ]
 }

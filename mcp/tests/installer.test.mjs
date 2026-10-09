@@ -6,11 +6,11 @@ import test from "node:test";
 import { configured, install, uninstall } from "../dist/hosts.js";
 
 const paths = async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-worker-mcp-installer-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-task-exec-installer-"));
   return { home: join(root, "home"), cwd: join(root, "project"), platform: "darwin" };
 };
 
-test("installer minimally merges, updates, and removes only pi-worker-mcp entries", async () => {
+test("installer minimally merges, updates, and removes only pi-task-exec entries", async () => {
   const locations = await paths();
   const cases = [
     ["codex", "global"], ["codex", "project"],
@@ -27,6 +27,29 @@ test("installer minimally merges, updates, and removes only pi-worker-mcp entrie
     assert.equal((await uninstall(selection, locations)).changed, false);
     assert.equal(await configured(selection, locations), false);
   }
+});
+
+test("host adapters write the pi-task-exec key, package, and mcp serve launch args", async () => {
+  const locations = await paths();
+
+  await install({ host: "codex", scope: "global" }, "0.1.1", locations);
+  const toml = await readFile(join(locations.home, ".codex", "config.toml"), "utf8");
+  assert.match(toml, /\[mcp_servers\.pi-task-exec\]/);
+  assert.match(toml, /args = \["-y", "@zguiyang\/pi-task-exec@0\.1\.1", "mcp", "serve"\]/);
+
+  await install({ host: "opencode", scope: "project" }, "0.1.1", locations);
+  const opencode = JSON.parse(await readFile(join(locations.cwd, "opencode.json"), "utf8"));
+  assert.deepEqual(opencode.mcp.servers["pi-task-exec"], {
+    type: "local",
+    command: ["npx", "-y", "@zguiyang/pi-task-exec@0.1.1", "mcp", "serve"],
+  });
+
+  await install({ host: "zed", scope: "project" }, "0.1.1", locations);
+  const zed = JSON.parse(await readFile(join(locations.cwd, ".zed", "settings.json"), "utf8"));
+  assert.deepEqual(zed.context_servers["pi-task-exec"], {
+    command: "npx",
+    args: ["-y", "@zguiyang/pi-task-exec@0.1.1", "mcp", "serve"],
+  });
 });
 
 test("JSON host adapters preserve unrelated MCP configuration", async () => {

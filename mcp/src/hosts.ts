@@ -2,8 +2,8 @@ import { access, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { dirname, join } from "node:path";
 
-export const PACKAGE_NAME = "@zguiyang/pi-worker-mcp";
-export const SERVER_ID = "pi-worker-mcp";
+export const PACKAGE_NAME = "@zguiyang/pi-task-exec";
+export const SERVER_ID = "pi-task-exec";
 export type HostName = "codex" | "zed" | "opencode";
 export type Scope = "project" | "global";
 export type HostSelection = { host: HostName; scope: Scope };
@@ -11,7 +11,7 @@ export type HostSelection = { host: HostName; scope: Scope };
 export type InstallPaths = { home: string; cwd: string; platform?: NodeJS.Platform };
 
 export function launchSpec(version: string) {
-  return { command: "npx", args: ["-y", `${PACKAGE_NAME}@${version}`, "serve"] };
+  return { command: "npx", args: ["-y", `${PACKAGE_NAME}@${version}`, "mcp", "serve"] };
 }
 
 export function supportsScope(_host: HostName, _scope: Scope): boolean {
@@ -31,7 +31,7 @@ async function exists(path: string) { try { await access(path, constants.F_OK); 
 async function readOptional(path: string) { return (await exists(path)) ? readFile(path, "utf8") : undefined; }
 async function writeAtomic(path: string, content: string) {
   await mkdir(dirname(path), { recursive: true });
-  const temporary = `${path}.pi-worker-mcp-${process.pid}.tmp`;
+  const temporary = `${path}.pi-task-exec-${process.pid}.tmp`;
   await writeFile(temporary, content, "utf8");
   await rename(temporary, path);
 }
@@ -46,7 +46,7 @@ function objectAt(value: unknown): Record<string, unknown> { return value && typ
 
 function upsertToml(raw: string | undefined, version: string): string {
   const header = `[mcp_servers.${SERVER_ID}]`;
-  const block = `${header}\ncommand = "npx"\nargs = ["-y", "${PACKAGE_NAME}@${version}", "serve"]\n`;
+  const block = `${header}\ncommand = "npx"\nargs = ["-y", "${PACKAGE_NAME}@${version}", "mcp", "serve"]\n`;
   const without = removeToml(raw);
   return `${without.trimEnd()}${without?.trim() ? "\n\n" : ""}${block}`;
 }
@@ -54,7 +54,7 @@ function upsertToml(raw: string | undefined, version: string): string {
 function removeToml(raw: string | undefined): string {
   if (!raw) return "";
   const lines = raw.split(/\r?\n/);
-  const start = lines.findIndex((line) => /^\s*\[mcp_servers\.pi-worker-mcp\]\s*$/.test(line));
+  const start = lines.findIndex((line) => /^\s*\[mcp_servers\.pi-task-exec\]\s*$/.test(line));
   if (start < 0) return raw;
   let end = start + 1;
   while (end < lines.length && !/^\s*\[.+\]\s*$/.test(lines[end] ?? "")) end++;
@@ -74,7 +74,7 @@ export async function install(selection: HostSelection, version: string, paths: 
     } else {
       const mcp = objectAt(root.mcp);
       const servers = objectAt(mcp.servers);
-      root.mcp = { ...mcp, servers: { ...servers, [SERVER_ID]: { type: "local", command: ["npx", "-y", `${PACKAGE_NAME}@${version}`, "serve"] } } };
+      root.mcp = { ...mcp, servers: { ...servers, [SERVER_ID]: { type: "local", command: ["npx", "-y", `${PACKAGE_NAME}@${version}`, "mcp", "serve"] } } };
     }
     await writeAtomic(path, `${JSON.stringify(root, null, 2)}\n`);
   }
@@ -103,7 +103,7 @@ export async function uninstall(selection: HostSelection, paths: InstallPaths): 
 export async function configured(selection: HostSelection, paths: InstallPaths): Promise<boolean> {
   const raw = await readOptional(configPath(selection, paths));
   if (!raw) return false;
-  if (selection.host === "codex") return new RegExp(`^\\s*\\[mcp_servers\\.${SERVER_ID.replace("-", "\\-")}\\]\\s*$`, "m").test(raw);
+  if (selection.host === "codex") return new RegExp(`^\\s*\\[mcp_servers\\.${SERVER_ID.replace(/-/g, "\\-")}\\]\\s*$`, "m").test(raw);
   try {
     const root = parseObject(raw, configPath(selection, paths));
     const container = selection.host === "zed" ? objectAt(root.context_servers) : objectAt(objectAt(root.mcp).servers);

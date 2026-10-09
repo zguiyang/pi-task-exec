@@ -220,7 +220,7 @@ export class PiRpcWorker {
           ? models.filter((model) => canonicalModel(model) === requestedModel)
           : models.filter((model) => model.id === requestedModel);
         if (matches.length === 0) {
-          throw new RpcError("MODEL_NOT_AVAILABLE", `Requested model "${requestedModel}" is not available in the local Pi environment for this worker. Check Pi's local model and authentication configuration, then retry. pi-worker-mcp does not configure providers, credentials, or available models.`);
+          throw new RpcError("MODEL_NOT_AVAILABLE", `Requested model "${requestedModel}" is not available in the local Pi environment for this worker. Check Pi's local model and authentication configuration, then retry. pi-task-exec does not configure providers, credentials, or available models.`);
         }
         if (matches.length > 1) {
           const candidates = matches.map(canonicalModel).sort();

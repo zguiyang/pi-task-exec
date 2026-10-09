@@ -8,8 +8,8 @@ mcp/dist/
 # Test and coverage output
 coverage/
 .nyc_output/
-.pi-worker-mcp/
-mcp/.pi-worker-mcp/
+.pi-task-exec/
+mcp/.pi-task-exec/
 
 # Temporary build/test files and directories
 tmp/

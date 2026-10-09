@@ -1,22 +1,26 @@
-# pi-worker MCP contract (v0.1.1)
+# Pi TaskExec MCP contract (v0.1.1)
 
 This reference describes the public interface of
-[`@zguiyang/pi-worker-mcp` v0.1.1](https://github.com/zguiyang/pi-worker-mcp/tree/v0.1.1).
+[`@zguiyang/pi-task-exec` v0.1.1](https://github.com/zguiyang/pi-task-exec/tree/v0.1.1).
 It is deliberately a delegation aid, not a second implementation of the
 runtime.
 
 ## Dependency and installation
 
-Install and configure the MCP for the chosen Host and scope first:
+Install and configure the MCP for the chosen Host and scope first. The
+`pi-task-exec add mcp` and `setup` installers are planned for a future stage and
+are not implemented in this build. Until then, register the MCP with the Host
+using the stdio launch contract:
 
-```sh
-npx -y @zguiyang/pi-worker-mcp@0.1.1 setup
+```text
+command: npx
+args:    -y @zguiyang/pi-task-exec@0.1.1 mcp serve
 ```
 
-The Host starts the MCP. Do not run `npx … serve` from this Skill. The runtime
-needs Node.js 20+, a configured local `pi` executable, and Git for `worktree`
-mode. Skill and MCP are independent repositories; installing this Skill does
-not install or configure the MCP.
+The Host starts the MCP. Do not run this launch command from the Skill. The
+runtime needs Node.js 20+, a configured local `pi` executable, and Git for
+`worktree` mode. Skill and MCP are independent repositories; installing this
+Skill does not install or configure the MCP.
 
 ## Delegation policy
 
@@ -61,7 +65,7 @@ or Skill-managed worker registry.
 ## Mode, profile, and safety
 
 `direct` uses the supplied checkout. `worktree` asks the MCP to create a Git
-worktree under `.pi-worker-mcp/worktrees`; it creates a `pi-worker/<id>` branch.
+worktree under `.pi-task-exec/worktrees`; it creates a `pi-task-exec/<id>` branch.
 Worktree edits are not automatically merged or deleted. The MCP creates the
 worktree from Git `HEAD`; unstaged, staged, and untracked source-checkout
 changes do not automatically appear there. Before choosing `worktree`, inspect

@@ -8,7 +8,7 @@ description: >-
   Supervisor.
 license: MIT
 metadata:
-  short-description: Delegate bounded work through the registered pi-worker MCP.
+  short-description: Delegate bounded work through the registered pi-task-exec MCP.
   version: "4"
   updated: "2026-10-08"
 ---
@@ -17,10 +17,10 @@ metadata:
 
 This is a delegation policy, not a Pi runtime. The Supervisor owns requirement
 interpretation, architecture, task decomposition, authorization, integration,
-review, and final acceptance. `pi-worker-mcp` owns Pi processes, RPC,
+review, and final acceptance. `pi-task-exec` owns Pi processes, RPC,
 worker IDs, concurrency, continuation, steering, timeouts, and release.
 
-Use the Host's already registered `pi-worker-mcp` tools directly. Never start
+Use the Host's already registered `pi-task-exec` tools directly. Never start
 the package through a shell, install it automatically, modify MCP
 configuration, change Pi credentials or defaults, or fall back to the legacy
 Pi CLI runner. If the MCP tools are unavailable, report the missing dependency

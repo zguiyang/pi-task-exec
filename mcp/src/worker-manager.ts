@@ -161,9 +161,9 @@ export class WorkerManager {
     const topLevel = execFileSync("git", ["-C", sourceCwd, "rev-parse", "--show-toplevel"], { encoding: "utf8", timeout }).trim();
     const prefix = execFileSync("git", ["-C", sourceCwd, "rev-parse", "--show-prefix"], { encoding: "utf8", timeout }).trim();
     const safeId = id.replaceAll("-", "").slice(0, 12);
-    const base = join(topLevel, ".pi-worker-mcp", "worktrees");
+    const base = join(topLevel, ".pi-task-exec", "worktrees");
     const path = join(base, safeId);
-    const branch = `pi-worker/${safeId}`;
+    const branch = `pi-task-exec/${safeId}`;
     await mkdir(base, { recursive: true });
     if (this.shuttingDown) throw new Error("MCP server is shutting down and cannot start workers");
     execFileSync("git", ["-C", topLevel, "worktree", "add", "-b", branch, path, "HEAD"], { stdio: "pipe", timeout });

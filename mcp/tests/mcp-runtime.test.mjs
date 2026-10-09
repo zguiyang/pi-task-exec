@@ -10,7 +10,7 @@ const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const fakePi = fileURLToPath(new URL("./fixtures/fake-pi.mjs", import.meta.url));
 
 function startServer(mode) {
-  const child = spawn(process.execPath, [resolve(root, "dist/index.js")], {
+  const child = spawn(process.execPath, [resolve(root, "dist/index.js"), "mcp", "serve"], {
     cwd: root,
     env: {
       ...process.env,
@@ -65,7 +65,7 @@ async function initialize(server) {
   const result = await server.request("initialize", {
     protocolVersion: "2025-03-26",
     capabilities: {},
-    clientInfo: { name: "pi-worker-mcp-test", version: "0.1.0" },
+    clientInfo: { name: "pi-task-exec-test", version: "0.1.0" },
   });
   assert.equal(result.error, undefined);
   server.notify("notifications/initialized");
@@ -87,6 +87,8 @@ test("MCP discovery exposes delegation guidance, tool choice semantics, and type
   const server = startServer("normal");
   try {
     const initialized = await initialize(server);
+    assert.equal(initialized.serverInfo.name, "pi-task-exec");
+    assert.equal(initialized.serverInfo.version, "0.1.1");
     assert.match(initialized.instructions, /subordinate coding workers/i);
     assert.match(initialized.instructions, /planning.*architecture.*delegation.*integration.*final review/i);
     assert.match(initialized.instructions, /never recursively delegate/i);
