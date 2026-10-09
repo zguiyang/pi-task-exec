@@ -212,7 +212,7 @@ test("no arguments shows help, exits 0, and never requests the MCP runtime", asy
   const { deps, captured } = makeDeps(await makeRoot());
   const action = await runCli([], deps);
   assert.deepEqual(action, { kind: "exit", code: 0 });
-  assert.match(captured.stdout(), /pi-task-exec 0\.2\.1/);
+  assert.match(captured.stdout(), /pi-task-exec 0\.2\.2/);
   assert.match(captured.stdout(), /Usage:/);
   assert.match(captured.stdout(), /mcp serve/);
   assert.equal(captured.stderr(), "");

@@ -106,10 +106,10 @@ export class CodexHostAdapter extends BaseHostAdapter {
         ),
       };
     }
-    const canonical = { ...existing, ...this.canonicalEntry(retainManagedLaunchOptions(existing, input.launch, "codex")) };
-    if (deepEqual(existing, canonical)) return { kind: "no-op", path, current: managed.current, warnings };
+    const canonical = this.canonicalEntry(input.launch);
     try {
-      const content = upsertTomlTable(input.currentContent ?? "", TABLE_PATH, canonical, ["command", "args"]);
+      const clean = removeTomlTable(input.currentContent ?? "", TABLE_PATH).content;
+      const content = upsertTomlTable(clean, TABLE_PATH, canonical, ["command", "args"]);
       return { kind: "update", path, content, current: managed.current, warnings };
     } catch (error) {
       const code = error instanceof TomlEditError ? error.code : "config_unparseable";

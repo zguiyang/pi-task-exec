@@ -119,8 +119,7 @@ export class ZedHostAdapter extends BaseHostAdapter {
         ),
       };
     }
-    const canonical = { ...existing, ...this.canonicalEntry(retainManagedLaunchOptions(existing, input.launch, "command-args")) };
-    if (deepEqual(existing, canonical)) return { kind: "no-op", path, current: managed.current, warnings };
+    const canonical = this.canonicalEntry(input.launch);
     try {
       const content = editJsonc(input.currentContent ?? "", [CONTAINER, SERVER_ID], canonical);
       return { kind: "update", path, content, current: managed.current, warnings };

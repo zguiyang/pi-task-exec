@@ -69,7 +69,7 @@ async function initialize(server, capabilities = {}) {
   const result = await server.request("initialize", {
     protocolVersion: "2025-03-26",
     capabilities,
-    clientInfo: { name: "pi-task-exec-test", version: "0.2.1" },
+    clientInfo: { name: "pi-task-exec-test", version: "0.2.2" },
   });
   assert.equal(result.error, undefined);
   server.notify("notifications/initialized");
@@ -92,7 +92,7 @@ test("MCP discovery exposes delegation guidance, tool choice semantics, and type
   try {
     const initialized = await initialize(server);
     assert.equal(initialized.serverInfo.name, "pi-task-exec");
-    assert.equal(initialized.serverInfo.version, "0.2.1");
+    assert.equal(initialized.serverInfo.version, "0.2.2");
     assert.match(initialized.instructions, /subordinate coding workers/i);
     assert.match(initialized.instructions, /planning.*architecture.*delegation.*integration.*final review/i);
     assert.match(initialized.instructions, /never recursively delegate/i);

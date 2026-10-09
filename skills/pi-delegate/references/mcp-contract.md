@@ -1,7 +1,7 @@
-# Pi TaskExec MCP contract (v0.2.1)
+# Pi TaskExec MCP contract (v0.2.2)
 
 This reference describes the public interface of
-[`@zguiyang/pi-task-exec` v0.2.1](https://github.com/zguiyang/pi-task-exec/tree/v0.2.1).
+[`@zguiyang/pi-task-exec` v0.2.2](https://github.com/zguiyang/pi-task-exec/tree/v0.2.2).
 It is deliberately a delegation aid, not a second implementation of the
 runtime.
 

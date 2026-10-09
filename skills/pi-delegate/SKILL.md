@@ -101,7 +101,7 @@ permission upgrade.
    after reviewing a settled worker with no follow-up. Then use `pi_list` when
    needed to confirm active capacity and release.
 
-Read [the MCP contract](references/mcp-contract.md) for exact v0.2.1
+Read [the MCP contract](references/mcp-contract.md) for exact v0.2.2
 parameters, state semantics, failures, and examples.
 
 ## Parallelism and writes

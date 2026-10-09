@@ -261,7 +261,7 @@ test("MCP old-version update rewrites only the pinned npm token and preserves un
   assert.doesNotMatch(merged, /@0\.0\.9/);
 });
 
-test("MCP already at target is an idempotent no-op and skips the release preflight", async () => {
+test("MCP already at target is still fully replaced and skips the Skill release preflight", async () => {
   const root = await makeRoot();
   const pkg = await makePackageRoot(root);
   const path = await seedCodex(root, "latest");
@@ -270,9 +270,8 @@ test("MCP already at target is an idempotent no-op and skips the release preflig
   const action = await runCli(["update", "--host", "codex", "--scope", "project", "--yes", "--json"], deps);
   assert.deepEqual(action, { kind: "exit", code: 0 });
   const [plan, execution] = jsonBlocks(captured.stdout());
-  assert.equal(plan.updatePreview[0].state, "no-op");
-  assert.ok(plan.warnings.some((warning) => warning.code === "already_up_to_date"));
-  assert.equal(plan.updates.length, 0);
+  assert.equal(plan.updatePreview[0].state, "update");
+  assert.equal(plan.updates.length, 1);
   assert.equal(execution.status, "no-op");
   assert.deepEqual(preflightCalls, []);
   assert.equal(await readFile(path, "utf8"), before);
@@ -308,8 +307,8 @@ test("one update replaces the MCP launcher and Skill with enabled/env settings p
   assert.deepEqual(result.parts.map(part => [part.target, part.status]), [["mcp", "success"], ["skill", "success"]]);
   const saved = await readFile(path, "utf8");
   assert.match(saved, /@latest/);
-  assert.match(saved, /enabled = true/);
-  assert.match(saved, /PI_WORKER_ALLOWED_ROOTS/);
+  assert.doesNotMatch(saved, /enabled/);
+  assert.doesNotMatch(saved, /PI_WORKER_ALLOWED_ROOTS/);
   assert.equal(calls.length, 1);
   assert.equal((await readJson(target.lockFile)).skills["pi-delegate"].ref, targetRef);
   assert.doesNotMatch(captured.stdout(), /\/allowed/);
@@ -402,21 +401,20 @@ test("checkout mode skill update targets the existing fixed SHA", async () => {
   assert.equal(plan.launchMode, "checkout");
 });
 
-test("skill already at target is a no-op that never invokes the Skills CLI", async () => {
+test("skill already at target is completely reinstalled", async () => {
   const root = await makeRoot();
   const pkg = await makePackageRoot(root);
   const target = await seedSkill(root, { scope: "project", ref: targetRef });
   const { spawn, calls } = makeSkillSpawn({ ...target, scope: "project", ref: targetRef });
-  const { deps, captured } = makeDeps(root, { packageRoot: pkg, skillSpawn: spawn });
+  const { deps, captured } = makeDeps(root, { packageRoot: pkg, skillSpawn: spawn, confirm: async () => true });
   const action = await runCli(["update", "--host", "codex", "--scope", "project", "--yes", "--json"], deps);
   assert.deepEqual(action, { kind: "exit", code: 0 });
   const [plan, execution] = jsonBlocks(captured.stdout());
   const skillPreview = plan.updatePreview.find((item) => item.target === "skill");
-  assert.equal(skillPreview.state, "no-op");
-  assert.ok(plan.warnings.some((warning) => warning.code === "skill_already_up_to_date"));
-  assert.equal(plan.skillCli, null);
-  assert.equal(execution.status, "no-op");
-  assert.equal(calls.length, 0);
+  assert.equal(skillPreview.state, "update");
+  assert.ok(plan.skillCli);
+  assert.equal(execution.status, "success");
+  assert.equal(calls.length, 1);
 });
 
 test("an absent skill is a no-write no-op that points at setup", async () => {
@@ -700,7 +698,7 @@ test("update with nothing installed is a no-op that never asks for confirmation"
   assert.ok(plan.warnings.some((warning) => warning.code === "skill_not_installed" && /setup/.test(warning.message)));
 });
 
-test("update with both components already current is a no-op that never asks for confirmation", async () => {
+test("update with both components already current confirms before full replacement", async () => {
   const root = await makeRoot();
   const pkg = await makePackageRoot(root);
   await seedCodex(root, "latest");
@@ -713,10 +711,10 @@ test("update with both components already current is a no-op that never asks for
   const action = await runCli(["update", "--host", "codex", "--scope", "project", "--json"], deps);
   assert.deepEqual(action, { kind: "exit", code: 0 });
   const [plan, execution] = jsonBlocks(captured.stdout());
-  assert.equal(confirmCalls, 0, "both-at-target is a mutation-free no-op");
-  assert.equal(execution.status, "no-op");
-  assert.equal(calls.length, 0);
-  assert.equal(plan.creates.length + plan.updates.length, 0);
+  assert.equal(confirmCalls, 2, "plan and existing Skill replacement are confirmed before writes");
+  assert.equal(execution.status, "success");
+  assert.equal(calls.length, 1);
+  assert.equal(plan.updates.length, 1);
   assert.equal(await readFile(join(root, "project", ".codex", "config.toml"), "utf8"), beforeConfig);
   assert.equal(await readFile(join(target.installDir, "SKILL.md"), "utf8"), beforeSkill);
 });
@@ -801,7 +799,7 @@ test("a missing or unverifiable release tag conflicts the complete update before
   assert.deepEqual(action, { kind: "exit", code: 1 });
   const [plan, execution] = jsonBlocks(captured.stdout());
   assert.equal(plan.conflicts[0].code, "release_tag_missing");
-  assert.match(plan.conflicts[0].message, /missing v0\.2\.1/);
+  assert.match(plan.conflicts[0].message, /missing v0\.2\.2/);
   assert.equal(execution.status, "conflict");
   assert.equal(calls.length, 0, "no Skills CLI spawn after a failed tag preflight");
   assert.equal(await readFile(configPath, "utf8"), beforeConfig);
@@ -860,7 +858,7 @@ test("the text preview shows current/target refs, managed key/path, scope impact
   assert.match(text, /target: @zguiyang\/pi-task-exec@latest/);
   assert.match(text, /Update .*config\.toml/);
   assert.match(text, /current: v0\.0\.9/);
-  assert.match(text, /target: v0\.2\.1/);
+  assert.match(text, /target: v0\.2\.2/);
   assert.match(text, /existing local changes may be lost/);
   assert.match(text, /Update MCP \+ Skill · Codex · project/);
 });

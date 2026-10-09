@@ -16,7 +16,7 @@ import { parseToml, upsertTomlTable } from "../../dist/cli/hosts/toml.js";
 
 const root = resolve(new URL("../..", import.meta.url).pathname);
 
-test("updates migrate pinned launchers to latest while preserving Host settings in both scopes", () => {
+test("updates replace entire MCP entries and remove old settings in both scopes", () => {
   for (const adapter of createDefaultAdapters()) for (const scope of ["project", "global"]) for (const enabled of [true, false]) {
     const context = { cwd: root, home: root, platform: process.platform, env: {} };
     const old = ["-y", "@zguiyang/pi-task-exec@0.1.0", "mcp", "serve"];
@@ -34,10 +34,10 @@ test("updates migrate pinned launchers to latest while preserving Host settings 
     assert.equal(updated.kind, "update");
     const doc = adapter.id === "codex" ? parseToml(updated.content) : JSON.parse(updated.content);
     const after = doc[container]["pi-task-exec"];
-    assert.deepEqual(JSON.parse(JSON.stringify(after)), adapter.id === "opencode" ? { ...entry, command: ["npx", ...launch.args] } : { ...entry, args: launch.args });
+    assert.deepEqual(JSON.parse(JSON.stringify(after)), adapter.id === "opencode" ? { type: "local", command: ["npx", ...launch.args] } : { command: "npx", args: launch.args });
     assert.equal(adapter.id === "codex" ? doc.model : doc.theme, "keep");
     if (adapter.id !== "codex") assert.deepEqual(doc[container].unrelated, { marker: "keep" });
-    assert.equal(adapter.planUpdate({ ...input, currentContent: updated.content }).kind, "no-op");
+    assert.equal(adapter.planUpdate({ ...input, currentContent: updated.content }).kind, "update");
     assert.equal(adapter.inspectConfig(context, scope, updated.content, updated.path, launch).managed, true);
   }
 });
@@ -45,7 +45,7 @@ test("updates migrate pinned launchers to latest while preserving Host settings 
 test("isolated npm resolution keeps the same launch across Hosts and scopes", async () => {
   const prefix = await mkdtemp(join(tmpdir(), "pi-launch-"));
   try {
-    const launch = resolveLaunchSpec({ packageRoot: prefix, packageVersion: "0.2.1", env: {}, npmPrefix: prefix }).launch;
+    const launch = resolveLaunchSpec({ packageRoot: prefix, packageVersion: "0.2.2", env: {}, npmPrefix: prefix }).launch;
     assert.deepEqual(launch, npmLaunchSpec(prefix));
     for (const adapter of createDefaultAdapters()) for (const scope of ["project", "global"]) {
       const planned = adapter.planEntry({ context: { cwd: prefix, home: prefix, platform: process.platform, env: {} }, scope, serverId: "pi-task-exec", launch, currentContent: null });
@@ -54,7 +54,7 @@ test("isolated npm resolution keeps the same launch across Hosts and scopes", as
       assert.ok(!planned.content.includes('cwd ='), "package resolution must not set process cwd");
     }
     assert.throws(() => npmLaunchSpec("relative"), /absolute/);
-    assert.throws(() => resolveLaunchSpec({ packageRoot: prefix, packageVersion: "0.2.1", env: {}, npmPrefix: join(prefix, "absent") }));
+    assert.throws(() => resolveLaunchSpec({ packageRoot: prefix, packageVersion: "0.2.2", env: {}, npmPrefix: join(prefix, "absent") }));
   } finally { await rm(prefix, { recursive: true, force: true }); }
 });
 
@@ -73,7 +73,7 @@ test("readiness uses only Codex native fields and never writes unsupported targe
   assert.match(planned.content, /required = true/);
   const errors = [];
   for (const host of ["opencode", "zed"]) {
-    const action = await runCli(["setup", "--host", host, "--scope", "project", "--require-mcp", "--dry-run"], { cwd: root, home: root, env: {}, platform: process.platform, packageRoot: root, packageVersion: "0.2.1", adapters: createDefaultAdapters(), skillInstaller: { id: "unavailable" }, spawn: async () => ({code:0,stdout:"",stderr:""}), now: () => new Date(), io: { stdout() {}, stderr(text) { errors.push(text); } } });
+    const action = await runCli(["setup", "--host", host, "--scope", "project", "--require-mcp", "--dry-run"], { cwd: root, home: root, env: {}, platform: process.platform, packageRoot: root, packageVersion: "0.2.2", adapters: createDefaultAdapters(), skillInstaller: { id: "unavailable" }, spawn: async () => ({code:0,stdout:"",stderr:""}), now: () => new Date(), io: { stdout() {}, stderr(text) { errors.push(text); } } });
     assert.equal(action.code, 1);
   }
   assert.match(errors.join(""), /requires a Codex MCP target/);
@@ -151,15 +151,18 @@ test("real npm prefix bypasses same-name root while preserving cwd", { skip: pro
 });
 
 
-test("managed updates retain isolated resolution and native readiness", () => {
+test("managed updates use only explicitly requested resolution and readiness options", () => {
   const prefix = tmpdir();
   for (const adapter of createDefaultAdapters()) {
     const context = { cwd: root, home: root, platform: process.platform, env: {} };
     const first = adapter.planEntry({ context, scope: "project", serverId: "pi-task-exec", launch: { ...{ ...npmLaunchSpec(prefix), args: npmLaunchSpec(prefix).args.map(arg => arg.replace("@latest", "@0.0.9")) }, ...(adapter.id === "codex" ? { requireReady: true } : {}) }, currentContent: null });
     const updated = adapter.planUpdate({ context, scope: "project", serverId: "pi-task-exec", launch: npmLaunchSpec(), currentContent: first.content });
     assert.equal(updated.kind, "update");
-    assert.ok(updated.content.includes(prefix));
+    assert.ok(!updated.content.includes(prefix));
     assert.ok(updated.content.includes("@zguiyang/pi-task-exec@latest"));
-    if (adapter.id === "codex") assert.match(updated.content, /required = true/);
+    if (adapter.id === "codex") assert.doesNotMatch(updated.content, /required = true/);
+    const explicit = adapter.planUpdate({ context, scope: "project", serverId: "pi-task-exec", launch: { ...npmLaunchSpec(prefix), ...(adapter.id === "codex" ? { requireReady: true } : {}) }, currentContent: first.content });
+    assert.ok(explicit.content.includes(prefix));
+    if (adapter.id === "codex") assert.match(explicit.content, /required = true/);
   }
 });

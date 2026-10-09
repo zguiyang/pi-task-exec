@@ -163,7 +163,7 @@ export function classifyManagedEntry(entry: Record<string, unknown>, format: Man
   return null;
 }
 
-/** Update owns the launcher; Host settings such as enabled/env stay intact. */
+/** Identify our launcher before replacing the complete server entry. */
 export function classifyManagedUpdateEntry(entry: Record<string, unknown>, format: ManagedEntryFormat): ManagedLaunch | null {
   const launcher = format === "opencode"
     ? { type: entry.type, command: entry.command }
@@ -180,7 +180,7 @@ export interface HostInspection {
   notes: string[];
 }
 
-/** Updates retain previously selected runtime/readiness settings. */
+/** Add/remove and doctor recognize previously selected launch options. */
 export function retainManagedLaunchOptions(entry: Record<string, unknown>, launch: McpLaunchSpec, format: ManagedEntryFormat): McpLaunchSpec {
   const previous = format === "opencode" ? entry.command : entry.args;
   const args = [...launch.args];

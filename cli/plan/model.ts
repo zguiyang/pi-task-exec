@@ -342,6 +342,7 @@ export function formatPlan(plan: InstallPlan, color = false): string {
   for (const item of plan.updates) lines.push(`  Update ${item.path}`);
   for (const item of plan.removals) lines.push(`  Remove ${item.path}`);
   if (plan.skillCli) lines.push(`  ${plan.operation === "update" ? "Update" : "Install"} ${plan.skillCli.installDir}`);
+  if (plan.operation === "update" && (plan.updates.length || plan.skillCli)) lines.push(highlight("  Existing Pi TaskExec settings and Skill files will be replaced.", "yellow", color));
   if (plan.backups.length) lines.push("  Existing configuration will be backed up.");
   for (const item of plan.updatePreview ?? []) {
     const version = item.current || item.desired ? ` (current: ${item.current ?? "none"}; target: ${item.desired ?? "none"})` : "";
@@ -452,7 +453,7 @@ function planMcpUpdate(
     host,
     content: result.content,
     baseSha256: currentContent === null ? null : sha256(currentContent),
-    summary: `Update the pi-task-exec MCP entry in ${adapter.displayName}.`,
+    summary: `Replace the complete pi-task-exec MCP entry in ${adapter.displayName}; existing custom settings will be removed.`,
   });
   plan.backups.push({ path: configPath, backupPath: plannedBackupPath(configPath), strategy: BACKUP_STRATEGY, reason: "update mcp entry" });
   plan.updatePreview?.push({ target: "mcp", state: "update", key: target.key, path: configPath, current: result.current, desired });

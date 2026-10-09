@@ -594,7 +594,6 @@ export async function detectSkillUpdate(input: {
       },
     };
   }
-  if (record.ref === input.desiredRef) return { kind: "ok", selection: { state: "no-op", currentRef: record.ref, ...base } };
   return { kind: "ok", selection: { state: "update", currentRef: record.ref, ...base } };
 }
 
@@ -752,22 +751,6 @@ export class SkillsCliInstaller implements SkillInstaller {
                 code: "skill_not_installed",
                 message: `The pi-delegate skill is not installed at ${paths.installDir} and the lockfile does not record it; run pi-task-exec setup to install it.`,
               },
-            ],
-            update: discovery,
-          },
-        };
-      }
-      if (discovery.state === "no-op") {
-        return {
-          kind: "ok",
-          plan: {
-            directory: paths.installDir,
-            writes: [],
-            removals: [],
-            conflicts: [],
-            warnings: [
-              ...pathWarnings,
-              { code: "skill_already_up_to_date", message: `pi-delegate is already at ${selected.ref} at ${paths.installDir}; the Skills CLI is not invoked.` },
             ],
             update: discovery,
           },

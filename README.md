@@ -17,9 +17,10 @@ tool capability profiles and `direct`/`worktree` are working-directory modes;
 neither is an operating-system security sandbox.
 
 Pi TaskExec is distributed through npm and the MCP Registry, with GitHub tags
-and releases providing the matching Skill source. Version 0.2.1 improves
-interactive setup/removal, connection diagnostics, and Host-provided workspace
-Roots while preserving all six `pi_*` tools. `remove skill` remains deferred.
+and releases providing the matching Skill source. Version 0.2.2 makes confirmed updates fully replace the Pi TaskExec MCP
+entry and Skill files, without inheriting old settings. Interactive setup,
+connection diagnostics, Host-provided workspace Roots and all six `pi_*` tools
+remain supported. `remove skill` remains deferred.
 
 For source development, build first and use `--local-dev` when installing a
 local launch entry. Published installations use the npm latest release.
@@ -34,7 +35,7 @@ the MCP Registry entry. All six MCP tools (`pi_spawn`, `pi_status`,
 | --- | --- |
 | `pi-task-exec` (no arguments) | Prints help and exits `0`; never starts MCP. |
 | `pi-task-exec --help` | Prints help and exits `0`; never starts MCP. |
-| `pi-task-exec --version` | Prints only `0.2.1` and exits `0`; never starts MCP. |
+| `pi-task-exec --version` | Prints only `0.2.2` and exits `0`; never starts MCP. |
 | `pi-task-exec mcp serve` | Starts the existing MCP stdio runtime. |
 | `pi-task-exec doctor [--json] [--probe]` | Default: read-only environment/config check. Explicit `--probe`: starts the package MCP for handshake, discovery and `pi_list`, then shuts it down; never creates Workers. |
 | `pi-task-exec add mcp [--host <codex\|zed\|opencode>] [--scope <project\|global>] [--dry-run] [--json] [--yes]` | Plans and safely merges the host MCP entry (stage 8); never starts MCP. On a TTY, a missing `--host`/`--scope` is an arrow-key prompt; `--json` fails instead of prompting. |
@@ -179,9 +180,10 @@ checkout development, prefer explicit --local-dev.
 true` field. The plan warns that failed initialization will then block Host
 startup/resume. It is opt-in and does not modify other MCP servers or global
 Host timing settings. Other Hosts reject this option rather than receiving
-unsupported fields. Managed updates retain previously selected npm prefixes and
-readiness settings. Updates replace the recognized launcher and preserve existing
-Host options such as enabled, environment, cwd and timeouts.
+unsupported fields. Updates replace the complete recognized Pi TaskExec entry after confirmation.
+Old fields, environment, cwd, timeouts, npm prefixes and readiness settings are
+not inherited; specify desired launch options on the update command. Other MCP
+entries remain unchanged.
 
 Installation output distinguishes saved configuration from untested connection
 and untested Host tool exposure. It never silently starts a Worker to check an
@@ -278,16 +280,15 @@ for `--json`/non-interactive runs.
 
 - **MCP discovery.** Updates recognize Pi TaskExec launchers using either a
   historical exact npm version, `@latest`, or the local source launch. They
-  replace the launch command/arguments with the current contract, preserving
-  existing Host fields such as `enabled`, environment, cwd and timeouts, plus
-  every unrelated MCP entry. Different packages, malformed configuration and
+  replace the entire server entry with the current contract, removing old
+  fields and custom settings while preserving every unrelated MCP entry. Different packages, malformed configuration and
   unrecognized commands still stop the update. An absent entry remains a no-op.
 - **Skill discovery.** The expected install directory and a valid lock record
   for `zguiyang/pi-task-exec` with a current ref are both required. An existing
   directory without a lock, a lock without the directory, another source, or a
   missing ref is a conflict; only when both are absent is the component treated
-  as not installed and pointed at `setup`. When the recorded ref already equals
-  the target, the result is a no-op and the Skills CLI is not invoked.
+  as not installed and pointed at `setup`. Even when the recorded ref equals
+  the target, update reinstalls the complete Skill directory after confirmation.
 - **Targets.** Release updates converge to the exact `v${packageVersion}`
   GitHub tag; source-checkout updates converge to the existing fixed commit
   `f914707fa22fd658f50e059a5091440796ef39e0`. Skill updates run

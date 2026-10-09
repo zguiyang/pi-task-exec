@@ -151,13 +151,13 @@ test("package engine floor and lockfile stay synchronized at Node >=22.20.0", as
 });
 
 test("source/ref selection is explicit: release tag for npm, pinned commit for checkout, never main", () => {
-  const release = resolveSkillRef({ launchMode: "npm", packageVersion: "0.2.1" });
-  assert.equal(release.ref, "v0.2.1");
+  const release = resolveSkillRef({ launchMode: "npm", packageVersion: "0.2.2" });
+  assert.equal(release.ref, "v0.2.2");
   assert.equal(release.refKind, "release");
-  assert.equal(release.source, `${SKILL_REPOSITORY}/tree/v0.2.1/${SKILL_SUBPATH}`);
+  assert.equal(release.source, `${SKILL_REPOSITORY}/tree/v0.2.2/${SKILL_SUBPATH}`);
   assert.doesNotMatch(release.source, /main|master/);
 
-  const checkout = resolveSkillRef({ launchMode: "checkout", packageVersion: "0.2.1" });
+  const checkout = resolveSkillRef({ launchMode: "checkout", packageVersion: "0.2.2" });
   assert.equal(checkout.ref, SKILL_DEV_REF);
   assert.equal(checkout.ref.length, 40);
   assert.equal(checkout.refKind, "commit");
