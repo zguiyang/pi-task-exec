@@ -157,9 +157,9 @@ export interface PlanDependencies {
 export type LaunchMode = "npm" | "checkout";
 
 /** Production npm install launch contract. */
-export function npmLaunchSpec(version: string, prefix?: string): McpLaunchSpec {
+export function npmLaunchSpec(prefix?: string): McpLaunchSpec {
   if (prefix !== undefined && !isAbsolute(prefix) && !win32.isAbsolute(prefix)) throw new Error("--npm-prefix must be an absolute directory");
-  return { command: "npx", args: [...(prefix ? ["--prefix", prefix] : []), "-y", `${PACKAGE_NAME}@${version}`, "mcp", "serve"] };
+  return { command: "npx", args: [...(prefix ? ["--prefix", prefix] : []), "-y", `${PACKAGE_NAME}@latest`, "mcp", "serve"] };
 }
 
 /** Source-checkout launch contract: an absolute local path, never an npm package. */
@@ -204,14 +204,14 @@ export function resolveLaunchSpec(input: {
     if (!isAbsolute(input.npmPrefix) || !statSync(input.npmPrefix).isDirectory()) throw new Error("--npm-prefix must be an existing absolute directory");
     if (existsSync(join(input.npmPrefix, "package.json")) || existsSync(join(input.npmPrefix, "node_modules"))) throw new Error("--npm-prefix must be independent of npm projects (no package.json or node_modules)");
   }
-  const launch = mode === "checkout" ? checkoutLaunchSpec(input.packageRoot) : npmLaunchSpec(input.packageVersion, input.npmPrefix);
+  const launch = mode === "checkout" ? checkoutLaunchSpec(input.packageRoot) : npmLaunchSpec(input.npmPrefix);
   if (input.requireReady) launch.requireReady = true;
   return { mode, launch };
 }
 
 /** @deprecated use {@link npmLaunchSpec}; retained for the stage 7 plan model. */
-export function launchSpec(version: string): { command: string; args: string[] } {
-  return npmLaunchSpec(version);
+export function launchSpec(_version: string): { command: string; args: string[] } {
+  return npmLaunchSpec();
 }
 
 export function skillTargetDir(scope: Scope, context: HostContext): string {

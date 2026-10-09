@@ -17,12 +17,12 @@ tool capability profiles and `direct`/`worktree` are working-directory modes;
 neither is an operating-system security sandbox.
 
 Pi TaskExec is distributed through npm and the MCP Registry, with GitHub tags
-and releases providing the matching Skill source. Version 0.2.0 improves
+and releases providing the matching Skill source. Version 0.2.1 improves
 interactive setup/removal, connection diagnostics, and Host-provided workspace
 Roots while preserving all six `pi_*` tools. `remove skill` remains deferred.
 
 For source development, build first and use `--local-dev` when installing a
-local launch entry. Published installations use a pinned npm package version.
+local launch entry. Published installations use the npm latest release.
 
 ## CLI surface
 
@@ -34,7 +34,7 @@ the MCP Registry entry. All six MCP tools (`pi_spawn`, `pi_status`,
 | --- | --- |
 | `pi-task-exec` (no arguments) | Prints help and exits `0`; never starts MCP. |
 | `pi-task-exec --help` | Prints help and exits `0`; never starts MCP. |
-| `pi-task-exec --version` | Prints only `0.2.0` and exits `0`; never starts MCP. |
+| `pi-task-exec --version` | Prints only `0.2.1` and exits `0`; never starts MCP. |
 | `pi-task-exec mcp serve` | Starts the existing MCP stdio runtime. |
 | `pi-task-exec doctor [--json] [--probe]` | Default: read-only environment/config check. Explicit `--probe`: starts the package MCP for handshake, discovery and `pi_list`, then shuts it down; never creates Workers. |
 | `pi-task-exec add mcp [--host <codex\|zed\|opencode>] [--scope <project\|global>] [--dry-run] [--json] [--yes]` | Plans and safely merges the host MCP entry (stage 8); never starts MCP. On a TTY, a missing `--host`/`--scope` is an arrow-key prompt; `--json` fails instead of prompting. |
@@ -106,22 +106,15 @@ Prerequisites: Node.js 22.20+, a locally installed and configured `pi` executabl
 and Git when using isolated worktrees. The Skill installer invokes the pinned
 `skills@1.7.1` CLI, which also requires Node.js 22.20+.
 
-Run `npx -y @zguiyang/pi-task-exec@0.2.0 setup` from the project you want to
+Run `npx -y @zguiyang/pi-task-exec@latest setup` from the project you want to
 configure. The `add`/`remove`/`setup` commands perform real configuration writes
 only after showing the plan and obtaining approval.
 
-From an installed package the launch entry is the npm stdio contract:
+The published launch contract follows npm latest:
 
 ```text
 command: npx
-args:    -y @zguiyang/pi-task-exec@<version> mcp serve
-```
-
-The v0.2.0 release launch is:
-
-```text
-command: npx
-args:    -y @zguiyang/pi-task-exec@0.2.0 mcp serve
+args:    -y @zguiyang/pi-task-exec@latest mcp serve
 ```
 
 From this source checkout, build first and launch the compiled CLI directly:
@@ -142,7 +135,7 @@ explicit `--local-dev` opt-in, writes a
 `--local-dev` the plan reports `local_dev_required` and writes nothing. The
 installer never represents that local path as the published npm package. From
 an installed package it writes the
-`npx -y @zguiyang/pi-task-exec@<version> mcp serve` entry. `doctor` is a
+`npx -y @zguiyang/pi-task-exec@latest mcp serve` entry. `doctor` is a
 read-only check and does not modify any host configuration.
 
 ## Connection diagnostics and optional launch controls
@@ -187,7 +180,8 @@ true` field. The plan warns that failed initialization will then block Host
 startup/resume. It is opt-in and does not modify other MCP servers or global
 Host timing settings. Other Hosts reject this option rather than receiving
 unsupported fields. Managed updates retain previously selected npm prefixes and
-readiness settings; unknown fields remain protected as configuration drift.
+readiness settings. Updates replace the recognized launcher and preserve existing
+Host options such as enabled, environment, cwd and timeouts.
 
 Installation output distinguishes saved configuration from untested connection
 and untested Host tool exposure. It never silently starts a Worker to check an
@@ -218,7 +212,7 @@ deletes only an entry that matches the `pi-task-exec` managed fingerprint.
 OpenCode's current supported config file names are `opencode.json` and
 `opencode.jsonc`; no other name is read or written. The runtime launch entry
 depends on how the CLI is run: from an installed package it is
-`npx -y @zguiyang/pi-task-exec@<version> mcp serve`; from a source checkout it
+`npx -y @zguiyang/pi-task-exec@latest mcp serve`; from a source checkout it
 is `node <absolute-checkout>/dist/cli/index.js mcp serve`, and the install is
 refused unless `--local-dev` is passed. An explicit absolute `CODEX_HOME`,
 `OPENCODE_CONFIG`, `OPENCODE_CONFIG_DIR`, or `XDG_CONFIG_HOME` override is
@@ -282,14 +276,12 @@ There is no `--target`/component-selection override for `update`; only `setup`
 accepts `--target`. Missing Agent/Scope are prompted on a TTY and are required
 for `--json`/non-interactive runs.
 
-- **MCP discovery.** A config entry is updated only when it is an exact
-  canonical `pi-task-exec` managed entry whose sole difference is the pinned
-  npm package semver token (`npx -y @zguiyang/pi-task-exec@<version> mcp serve`)
-  or the absolute source-checkout launch (`node <path>/dist/cli/index.js mcp
-  serve`). An entry with any changed or unknown field, an `env`/`enabled`
-  block, a different package, a non-semver token, or changed args is a
-  conflict and is never rewritten. An absent entry is a no-op that points at
-  `pi-task-exec setup`.
+- **MCP discovery.** Updates recognize Pi TaskExec launchers using either a
+  historical exact npm version, `@latest`, or the local source launch. They
+  replace the launch command/arguments with the current contract, preserving
+  existing Host fields such as `enabled`, environment, cwd and timeouts, plus
+  every unrelated MCP entry. Different packages, malformed configuration and
+  unrecognized commands still stop the update. An absent entry remains a no-op.
 - **Skill discovery.** The expected install directory and a valid lock record
   for `zguiyang/pi-task-exec` with a current ref are both required. An existing
   directory without a lock, a lock without the directory, another source, or a
@@ -307,7 +299,10 @@ for `--json`/non-interactive runs.
   A missing or unverifiable tag conflicts the entire plan, writes nothing, and
   never falls back to `main`. An MCP-only update (Skill absent or already at
   target) and a checkout-mode commit Skill update are never blocked by an
-  unrelated GitHub tag. There is no npm `latest` query.
+  unrelated GitHub tag. Running `npx -y @zguiyang/pi-task-exec@latest update` resolves the current CLI
+  release; the MCP entry follows `@latest` on future starts, while the Skill
+  is updated to that CLI release’s matching tag. Restart the Host to launch a
+  new MCP process; Skill files change only when setup/update is executed.
 - **Preview and safety.** The plan preview shows the current and target
   version/ref, the managed MCP config key and path, the Skill path, the
   project/global (shared `.agents/skills`) scope, and that an existing Skill

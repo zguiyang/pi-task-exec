@@ -12,41 +12,68 @@ import { createDefaultAdapters } from "../../dist/cli/hosts/adapters.js";
 import { classifyManagedEntry } from "../../dist/cli/hosts/shared.js";
 import { parseCli, runCli } from "../../dist/cli/commands/index.js";
 import { probeMcp } from "../../dist/cli/commands/probe.js";
+import { parseToml, upsertTomlTable } from "../../dist/cli/hosts/toml.js";
 
 const root = resolve(new URL("../..", import.meta.url).pathname);
+
+test("updates migrate pinned launchers to latest while preserving Host settings in both scopes", () => {
+  for (const adapter of createDefaultAdapters()) for (const scope of ["project", "global"]) for (const enabled of [true, false]) {
+    const context = { cwd: root, home: root, platform: process.platform, env: {} };
+    const old = ["-y", "@zguiyang/pi-task-exec@0.1.0", "mcp", "serve"];
+    const options = { enabled, startup_timeout_sec: 30, ...(adapter.id === "codex" ? { required: false } : {}) };
+    const entry = adapter.id === "opencode"
+      ? { type: "local", command: ["npx", ...old], environment: { PI_WORKER_ALLOWED_ROOTS: "/allowed" }, ...options }
+      : { command: "npx", args: old, env: { PI_WORKER_ALLOWED_ROOTS: "/allowed" }, ...options };
+    const container = adapter.id === "codex" ? "mcp_servers" : adapter.id === "zed" ? "context_servers" : "mcp";
+    const before = adapter.id === "codex"
+      ? upsertTomlTable('model = "keep"\n', [container, "pi-task-exec"], entry, ["command", "args"])
+      : JSON.stringify({ theme: "keep", [container]: { "pi-task-exec": entry, unrelated: { marker: "keep" } } });
+    const launch = npmLaunchSpec();
+    const input = { context, scope, serverId: "pi-task-exec", launch, currentContent: before };
+    const updated = adapter.planUpdate(input);
+    assert.equal(updated.kind, "update");
+    const doc = adapter.id === "codex" ? parseToml(updated.content) : JSON.parse(updated.content);
+    const after = doc[container]["pi-task-exec"];
+    assert.deepEqual(JSON.parse(JSON.stringify(after)), adapter.id === "opencode" ? { ...entry, command: ["npx", ...launch.args] } : { ...entry, args: launch.args });
+    assert.equal(adapter.id === "codex" ? doc.model : doc.theme, "keep");
+    if (adapter.id !== "codex") assert.deepEqual(doc[container].unrelated, { marker: "keep" });
+    assert.equal(adapter.planUpdate({ ...input, currentContent: updated.content }).kind, "no-op");
+    assert.equal(adapter.inspectConfig(context, scope, updated.content, updated.path, launch).managed, true);
+  }
+});
 
 test("isolated npm resolution keeps the same launch across Hosts and scopes", async () => {
   const prefix = await mkdtemp(join(tmpdir(), "pi-launch-"));
   try {
-    const launch = resolveLaunchSpec({ packageRoot: prefix, packageVersion: "0.2.0", env: {}, npmPrefix: prefix }).launch;
-    assert.deepEqual(launch, npmLaunchSpec("0.2.0", prefix));
+    const launch = resolveLaunchSpec({ packageRoot: prefix, packageVersion: "0.2.1", env: {}, npmPrefix: prefix }).launch;
+    assert.deepEqual(launch, npmLaunchSpec(prefix));
     for (const adapter of createDefaultAdapters()) for (const scope of ["project", "global"]) {
       const planned = adapter.planEntry({ context: { cwd: prefix, home: prefix, platform: process.platform, env: {} }, scope, serverId: "pi-task-exec", launch, currentContent: null });
       assert.equal(planned.kind, "ok");
       assert.ok(planned.content.includes(prefix));
       assert.ok(!planned.content.includes('cwd ='), "package resolution must not set process cwd");
     }
-    assert.throws(() => npmLaunchSpec("0.2.0", "relative"), /absolute/);
-    assert.throws(() => resolveLaunchSpec({ packageRoot: prefix, packageVersion: "0.2.0", env: {}, npmPrefix: join(prefix, "absent") }));
+    assert.throws(() => npmLaunchSpec("relative"), /absolute/);
+    assert.throws(() => resolveLaunchSpec({ packageRoot: prefix, packageVersion: "0.2.1", env: {}, npmPrefix: join(prefix, "absent") }));
   } finally { await rm(prefix, { recursive: true, force: true }); }
 });
 
 test("managed fingerprints recognize isolated/required entries but retain drift protection", () => {
-  const entry = { command: "npx", args: npmLaunchSpec("0.2.0", tmpdir()).args, required: true };
-  assert.equal(classifyManagedEntry(entry, "codex").current, "@zguiyang/pi-task-exec@0.2.0");
+  const entry = { command: "npx", args: npmLaunchSpec(tmpdir()).args, required: true };
+  assert.equal(classifyManagedEntry(entry, "codex").current, "@zguiyang/pi-task-exec@latest");
   assert.equal(classifyManagedEntry(entry, "command-args"), null);
   assert.equal(classifyManagedEntry({ ...entry, env: { TOKEN: "secret" } }, "codex"), null);
   assert.equal(classifyManagedEntry({ ...entry, required: false }, "codex"), null);
 });
 
 test("readiness uses only Codex native fields and never writes unsupported targets", async () => {
-  const launch = { ...npmLaunchSpec("0.2.0"), requireReady: true };
+  const launch = { ...npmLaunchSpec(), requireReady: true };
   const adapter = createDefaultAdapters()[0];
   const planned = adapter.planEntry({ context: { cwd: root, home: root, platform: process.platform, env: {} }, scope: "project", serverId: "pi-task-exec", launch, currentContent: null });
   assert.match(planned.content, /required = true/);
   const errors = [];
   for (const host of ["opencode", "zed"]) {
-    const action = await runCli(["setup", "--host", host, "--scope", "project", "--require-mcp", "--dry-run"], { cwd: root, home: root, env: {}, platform: process.platform, packageRoot: root, packageVersion: "0.2.0", adapters: createDefaultAdapters(), skillInstaller: { id: "unavailable" }, spawn: async () => ({code:0,stdout:"",stderr:""}), now: () => new Date(), io: { stdout() {}, stderr(text) { errors.push(text); } } });
+    const action = await runCli(["setup", "--host", host, "--scope", "project", "--require-mcp", "--dry-run"], { cwd: root, home: root, env: {}, platform: process.platform, packageRoot: root, packageVersion: "0.2.1", adapters: createDefaultAdapters(), skillInstaller: { id: "unavailable" }, spawn: async () => ({code:0,stdout:"",stderr:""}), now: () => new Date(), io: { stdout() {}, stderr(text) { errors.push(text); } } });
     assert.equal(action.code, 1);
   }
   assert.match(errors.join(""), /requires a Codex MCP target/);
@@ -128,11 +155,11 @@ test("managed updates retain isolated resolution and native readiness", () => {
   const prefix = tmpdir();
   for (const adapter of createDefaultAdapters()) {
     const context = { cwd: root, home: root, platform: process.platform, env: {} };
-    const first = adapter.planEntry({ context, scope: "project", serverId: "pi-task-exec", launch: { ...npmLaunchSpec("0.0.9", prefix), ...(adapter.id === "codex" ? { requireReady: true } : {}) }, currentContent: null });
-    const updated = adapter.planUpdate({ context, scope: "project", serverId: "pi-task-exec", launch: npmLaunchSpec("0.2.0"), currentContent: first.content });
+    const first = adapter.planEntry({ context, scope: "project", serverId: "pi-task-exec", launch: { ...{ ...npmLaunchSpec(prefix), args: npmLaunchSpec(prefix).args.map(arg => arg.replace("@latest", "@0.0.9")) }, ...(adapter.id === "codex" ? { requireReady: true } : {}) }, currentContent: null });
+    const updated = adapter.planUpdate({ context, scope: "project", serverId: "pi-task-exec", launch: npmLaunchSpec(), currentContent: first.content });
     assert.equal(updated.kind, "update");
     assert.ok(updated.content.includes(prefix));
-    assert.ok(updated.content.includes("@zguiyang/pi-task-exec@0.2.0"));
+    assert.ok(updated.content.includes("@zguiyang/pi-task-exec@latest"));
     if (adapter.id === "codex") assert.match(updated.content, /required = true/);
   }
 });

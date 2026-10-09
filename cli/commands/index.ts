@@ -113,7 +113,7 @@ Options:
 
 Hosts: ${KNOWN_HOST_IDS.join(", ")}. Scopes: project, global.
 No arguments prints this help and never starts MCP.
-MCP stdio launch: npx -y ${PACKAGE_NAME}@${VERSION} mcp serve`;
+MCP stdio launch: npx -y ${PACKAGE_NAME}@latest mcp serve`;
 
 function commandHelp(topic: string): string {
   switch (topic) {

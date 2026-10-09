@@ -10,7 +10,7 @@ import { parseJsoncRoot } from "../../dist/cli/hosts/jsonc.js";
 import { detectLaunchMode, resolveLaunchSpec } from "../../dist/cli/plan/model.js";
 import { unavailableSkillInstaller } from "../../dist/cli/installers/skill.js";
 
-const npmLaunch = { command: "npx", args: ["-y", `@zguiyang/pi-task-exec@${VERSION}`, "mcp", "serve"] };
+const npmLaunch = { command: "npx", args: ["-y", `@zguiyang/pi-task-exec@latest`, "mcp", "serve"] };
 
 async function makeRoot() {
   return mkdtemp(join(tmpdir(), "pi-task-exec-host-"));
@@ -78,7 +78,7 @@ const exists = async (path) => { try { await stat(path); return true; } catch { 
 
 test("npm install mode is the default and uses the published package with structured args", () => {
   const spec = resolveLaunchSpec({ packageRoot: "/tmp/some-package", packageVersion: "1.2.3", env: {} });
-  assert.deepEqual(spec, { mode: "npm", launch: { command: "npx", args: ["-y", "@zguiyang/pi-task-exec@1.2.3", "mcp", "serve"] } });
+  assert.deepEqual(spec, { mode: "npm", launch: { command: "npx", args: ["-y", "@zguiyang/pi-task-exec@latest", "mcp", "serve"] } });
 });
 
 test("checkout mode uses node with an absolute local dist/cli/index.js path, never an npm package", () => {
@@ -154,7 +154,7 @@ test("Codex project install targets cwd/.codex/config.toml and warns about proje
   const toml = await readFile(path, "utf8");
   assert.match(toml, /\[mcp_servers\.pi-task-exec\]/);
   assert.match(toml, /command = "npx"/);
-  assert.match(toml, /args = \["-y", "@zguiyang\/pi-task-exec@0\.2\.0", "mcp", "serve"\]/);
+  assert.match(toml, /args = \["-y", "@zguiyang\/pi-task-exec@latest", "mcp", "serve"\]/);
   assert.ok(blocks[0].warnings.some((warning) => warning.code === "project_trust_required"));
   assert.match(stdout, /trust/);
 });
@@ -205,7 +205,7 @@ test("Codex install is exact-content idempotent and refuses an old-version entry
 
   const path = join(root, "home", ".codex", "config.toml");
   const before = await readFile(path, "utf8");
-  await writeFile(path, before.replace(/@0\.2\.0/, "@0.0.9"));
+  await writeFile(path, before.replace(/@latest/, "@0.0.9"));
   const third = await run(root, ["add", "mcp", "--host", "codex", "--scope", "global", "--yes", "--json"]);
   assert.deepEqual(third.action, { kind: "exit", code: 1 });
   assert.equal(third.blocks[0].conflicts[0].code, "mcp_entry_conflict");
@@ -224,7 +224,7 @@ test("Codex removal removes only the managed entry and preserves everything else
     "",
     "[mcp_servers.pi-task-exec]",
     'command = "npx"',
-    'args = ["-y", "@zguiyang/pi-task-exec@0.2.0", "mcp", "serve"]',
+    'args = ["-y", "@zguiyang/pi-task-exec@latest", "mcp", "serve"]',
     "",
     "[history]",
     'persistence = "save-all"',
@@ -641,7 +641,7 @@ test("old version and modified Codex entry fields are fingerprint drift for both
   const root2 = await makeRoot();
   const path2 = join(root2, "home", ".codex", "config.toml");
   await mkdir(join(root2, "home", ".codex"), { recursive: true });
-  await writeFile(path2, `[mcp_servers.pi-task-exec]\ncommand = "npx"\nargs = ["-y", "@zguiyang/pi-task-exec@${VERSION}", "mcp", "serve"]\nenv = { TOKEN = "x" }\n`);
+  await writeFile(path2, `[mcp_servers.pi-task-exec]\ncommand = "npx"\nargs = ["-y", "@zguiyang/pi-task-exec@latest", "mcp", "serve"]\nenv = { TOKEN = "x" }\n`);
   const extra = await run(root2, ["add", "mcp", "--host", "codex", "--scope", "global", "--yes", "--json"]);
   assert.deepEqual(extra.action, { kind: "exit", code: 1 });
   assert.equal(extra.blocks[0].conflicts[0].code, "mcp_entry_conflict");

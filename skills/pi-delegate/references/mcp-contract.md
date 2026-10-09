@@ -1,7 +1,7 @@
-# Pi TaskExec MCP contract (v0.2.0)
+# Pi TaskExec MCP contract (v0.2.1)
 
 This reference describes the public interface of
-[`@zguiyang/pi-task-exec` v0.2.0](https://github.com/zguiyang/pi-task-exec/tree/v0.2.0).
+[`@zguiyang/pi-task-exec` v0.2.1](https://github.com/zguiyang/pi-task-exec/tree/v0.2.1).
 It is deliberately a delegation aid, not a second implementation of the
 runtime.
 
@@ -11,14 +11,14 @@ Run the unified setup flow for the chosen Agent and scope to install both the
 MCP and this Skill:
 
 ```text
-npx -y @zguiyang/pi-task-exec@0.2.0 setup
+npx -y @zguiyang/pi-task-exec@latest setup
 ```
 
 For a direct Host configuration, the stdio launch contract is:
 
 ```text
 command: npx
-args:    -y @zguiyang/pi-task-exec@0.2.0 mcp serve
+args:    -y @zguiyang/pi-task-exec@latest mcp serve
 ```
 
 The Host starts the MCP. Do not run this launch command from the Skill. The

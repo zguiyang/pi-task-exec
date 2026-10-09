@@ -1,6 +1,6 @@
 {
   "name": "@zguiyang/pi-task-exec",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "mcpName": "io.github.zguiyang/pi-task-exec",
   "description": "A host-agnostic MCP worker runtime for supervising local Pi coding-agent processes.",
   "license": "MIT",

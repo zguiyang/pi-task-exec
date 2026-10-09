@@ -212,7 +212,7 @@ test("no arguments shows help, exits 0, and never requests the MCP runtime", asy
   const { deps, captured } = makeDeps(await makeRoot());
   const action = await runCli([], deps);
   assert.deepEqual(action, { kind: "exit", code: 0 });
-  assert.match(captured.stdout(), /pi-task-exec 0\.2\.0/);
+  assert.match(captured.stdout(), /pi-task-exec 0\.2\.1/);
   assert.match(captured.stdout(), /Usage:/);
   assert.match(captured.stdout(), /mcp serve/);
   assert.equal(captured.stderr(), "");
@@ -389,7 +389,7 @@ test("supported fake adapter writes on --yes, then is idempotent on a second run
   assert.deepEqual(firstAction, { kind: "exit", code: 0 });
   const configPath = join(root, "project", "config.json");
   const written = JSON.parse(await readFile(configPath, "utf8"));
-  assert.deepEqual(written.mcpServers["pi-task-exec"], { command: "npx", args: ["-y", "@zguiyang/pi-task-exec@0.2.0", "mcp", "serve"] });
+  assert.deepEqual(written.mcpServers["pi-task-exec"], { command: "npx", args: ["-y", "@zguiyang/pi-task-exec@latest", "mcp", "serve"] });
 
   const second = makeDeps(root);
   const secondAction = await runCli(["add", "mcp", "--host", "codex", "--scope", "project", "--yes"], second.deps);

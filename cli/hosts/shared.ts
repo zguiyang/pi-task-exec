@@ -103,8 +103,8 @@ export interface ManagedLaunch {
   current: string;
 }
 
-// The exact package token this tool owns. A different package, a range, or
-// `latest` is not a managed entry and must conflict rather than be rewritten.
+// Recognize historical pinned versions alongside the current latest launcher.
+// Other packages and version ranges remain outside this installer's ownership.
 const PACKAGE_TOKEN = new RegExp(
   `^${PACKAGE_NAME.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}@\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$`,
 );
@@ -146,7 +146,7 @@ export function classifyManagedEntry(entry: Record<string, unknown>, format: Man
     full[3] === "mcp" &&
     full[4] === "serve" &&
     typeof full[2] === "string" &&
-    PACKAGE_TOKEN.test(full[2])
+    (PACKAGE_TOKEN.test(full[2]) || full[2] === `${PACKAGE_NAME}@latest`)
   ) {
     return { mode: "npm", current: full[2] };
   }
@@ -161,6 +161,14 @@ export function classifyManagedEntry(entry: Record<string, unknown>, format: Man
     return { mode: "checkout", current: full[1] };
   }
   return null;
+}
+
+/** Update owns the launcher; Host settings such as enabled/env stay intact. */
+export function classifyManagedUpdateEntry(entry: Record<string, unknown>, format: ManagedEntryFormat): ManagedLaunch | null {
+  const launcher = format === "opencode"
+    ? { type: entry.type, command: entry.command }
+    : { command: entry.command, args: entry.args };
+  return classifyManagedEntry(launcher, format);
 }
 
 export interface HostInspection {

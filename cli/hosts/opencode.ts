@@ -3,7 +3,7 @@ import type { McpEntryPlanResult, McpPlanInput, McpRemovalPlanResult, McpUpdateP
 import { SERVER_ID } from "../identity.js";
 import type { HostContext, PlanConflict, PlanWarning, Scope } from "../plan/model.js";
 import { editJsonc, JsoncEditError, parseJsoncRoot, requireObjectContainer, type JsonRecord } from "./jsonc.js";
-import { BaseHostAdapter, absoluteEnvPath, classifyManagedEntry, retainManagedLaunchOptions, deepEqual, envPath, pathForPlatform, type HostInspection, xdgConfigHome } from "./shared.js";
+import { BaseHostAdapter, absoluteEnvPath, classifyManagedUpdateEntry, retainManagedLaunchOptions, deepEqual, envPath, pathForPlatform, type HostInspection, xdgConfigHome } from "./shared.js";
 
 const CONTAINER = "mcp";
 
@@ -152,18 +152,18 @@ export class OpenCodeHostAdapter extends BaseHostAdapter {
     if (!parsed.ok) return { kind: "conflict", conflict: parsed.conflict };
     const existing = parsed.existing;
     if (!existing) return { kind: "absent", path };
-    const managed = classifyManagedEntry(existing, "opencode");
+    const managed = classifyManagedUpdateEntry(existing, "opencode");
     if (!managed) {
       return {
         kind: "conflict",
         conflict: conflict(
           path,
           "mcp_entry_conflict",
-          `An existing mcp.${SERVER_ID} entry at ${path} cannot be proven managed (unknown fields, env, or changed args); refusing to update it.`,
+          `An existing mcp.${SERVER_ID} entry at ${path} does not have a recognized Pi TaskExec launcher; refusing to replace another command.`,
         ),
       };
     }
-    const canonical = this.canonicalEntry(retainManagedLaunchOptions(existing, input.launch, "opencode"));
+    const canonical = { ...existing, ...this.canonicalEntry(retainManagedLaunchOptions(existing, input.launch, "opencode")) };
     if (deepEqual(existing, canonical)) return { kind: "no-op", path, current: managed.current, warnings };
     try {
       const content = editJsonc(input.currentContent ?? "", [CONTAINER, SERVER_ID], canonical);
@@ -210,7 +210,7 @@ export class OpenCodeHostAdapter extends BaseHostAdapter {
       return { entryPresent: false, managed: false, parseError: error instanceof Error ? error.message : String(error), notes: [] };
     }
     if (!existing) return { entryPresent: false, managed: false, notes: [] };
-    const managed = deepEqual(existing, this.canonicalEntry(retainManagedLaunchOptions(existing, launch, "opencode")));
+    const managed = classifyManagedUpdateEntry(existing, "opencode") !== null && deepEqual(existing, { ...existing, ...this.canonicalEntry(retainManagedLaunchOptions(existing, launch, "opencode")) });
     return { entryPresent: true, managed, notes: managed ? [] : [`Existing mcp.${SERVER_ID} entry does not match the exact managed fingerprint.`] };
   }
 }

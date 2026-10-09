@@ -248,7 +248,7 @@ test("MCP old-version update rewrites only the pinned npm token and preserves un
   assert.equal(plan.operation, "update");
   assert.equal(plan.updatePreview[0].state, "update");
   assert.equal(plan.updatePreview[0].current, "@zguiyang/pi-task-exec@0.0.9");
-  assert.equal(plan.updatePreview[0].desired, `@zguiyang/pi-task-exec@${VERSION}`);
+  assert.equal(plan.updatePreview[0].desired, `@zguiyang/pi-task-exec@latest`);
   assert.equal(plan.updatePreview[0].key, "mcp_servers.pi-task-exec");
   assert.equal(plan.hostTarget.path, path);
   assert.equal(execution.status, "success");
@@ -257,14 +257,14 @@ test("MCP old-version update rewrites only the pinned npm token and preserves un
   const merged = await readFile(path, "utf8");
   assert.match(merged, /# keep comment/);
   assert.match(merged, /\[history\]/);
-  assert.match(merged, /@0\.2\.0/);
+  assert.match(merged, /@latest/);
   assert.doesNotMatch(merged, /@0\.0\.9/);
 });
 
 test("MCP already at target is an idempotent no-op and skips the release preflight", async () => {
   const root = await makeRoot();
   const pkg = await makePackageRoot(root);
-  const path = await seedCodex(root, VERSION);
+  const path = await seedCodex(root, "latest");
   const before = await readFile(path, "utf8");
   const { deps, captured, preflightCalls } = makeDeps(root, { packageRoot: pkg });
   const action = await runCli(["update", "--host", "codex", "--scope", "project", "--yes", "--json"], deps);
@@ -293,11 +293,31 @@ test("MCP absent is a no-write no-op that points at setup and never installs", a
   assert.equal(await exists(join(root, "project", ".codex", "config.toml")), false);
 });
 
+test("one update replaces the MCP launcher and Skill with enabled/env settings present", async () => {
+  const root = await makeRoot();
+  const pkg = await makePackageRoot(root);
+  const path = await seedCodex(root, "0.1.0");
+  await writeFile(path, (await readFile(path, "utf8")) + 'enabled = true\nenv = { PI_WORKER_ALLOWED_ROOTS = "/allowed" }\n');
+  const target = await seedSkill(root, { scope: "project", ref: "v0.1.0" });
+  const { spawn, calls } = makeSkillSpawn({ ...target, scope: "project", ref: targetRef });
+  const { deps, captured } = makeDeps(root, { packageRoot: pkg, skillSpawn: spawn, confirm: async () => true });
+  const action = await runCli(["update", "--host", "codex", "--scope", "project", "--yes", "--json"], deps);
+  assert.equal(action.code, 0);
+  const [plan, result] = jsonBlocks(captured.stdout());
+  assert.deepEqual(plan.conflicts, []);
+  assert.deepEqual(result.parts.map(part => [part.target, part.status]), [["mcp", "success"], ["skill", "success"]]);
+  const saved = await readFile(path, "utf8");
+  assert.match(saved, /@latest/);
+  assert.match(saved, /enabled = true/);
+  assert.match(saved, /PI_WORKER_ALLOWED_ROOTS/);
+  assert.equal(calls.length, 1);
+  assert.equal((await readJson(target.lockFile)).skills["pi-delegate"].ref, targetRef);
+  assert.doesNotMatch(captured.stdout(), /\/allowed/);
+});
+
 test("unknown or modified same-name MCP entries conflict and are never rewritten", async () => {
   const cases = [
-    `[mcp_servers.pi-task-exec]\ncommand = "npx"\nargs = ["-y", "@zguiyang/pi-task-exec@0.0.9", "mcp", "serve"]\nenv = { TOKEN = "x" }\n`,
     `[mcp_servers.pi-task-exec]\ncommand = "npx"\nargs = ["-y", "@someone-else/pi-task-exec@0.0.9", "mcp", "serve"]\n`,
-    `[mcp_servers.pi-task-exec]\ncommand = "npx"\nargs = ["-y", "@zguiyang/pi-task-exec@latest", "mcp", "serve"]\n`,
     `[mcp_servers.pi-task-exec]\ncommand = "npx"\nargs = ["-y", "@zguiyang/pi-task-exec@0.0.9", "mcp", "serve", "--extra"]\n`,
   ];
   for (const entry of cases) {
@@ -558,7 +578,7 @@ test("combined update reports success when both installed components update", as
   assert.equal(execution.status, "success");
   assert.equal(spawnCalls.length, 1);
   assert.deepEqual(preflightCalls, [targetRef]);
-  assert.match(await readFile(join(root, "project", ".codex", "config.toml"), "utf8"), /@0\.2\.0/);
+  assert.match(await readFile(join(root, "project", ".codex", "config.toml"), "utf8"), /@latest/);
 });
 
 test("combined update asks the replacement confirmation once before the MCP write", async () => {
@@ -578,7 +598,7 @@ test("combined update asks the replacement confirmation once before the MCP writ
   assert.equal(confirmCalls.length, 1, "the safety prompt is asked once, not duplicated after the MCP write");
   assert.equal(confirmCalls[0].safety, "skill-path-safety");
   assert.equal(calls.length, 1);
-  assert.match(await readFile(join(root, "project", ".codex", "config.toml"), "utf8"), /@0\.2\.0/);
+  assert.match(await readFile(join(root, "project", ".codex", "config.toml"), "utf8"), /@latest/);
   const [plan] = jsonBlocks(captured.stdout());
   assert.equal(plan.operation, "update");
 });
@@ -590,7 +610,7 @@ test("combined update preserves MCP success when the skill install fails (partia
   assert.equal(execution.status, "partial");
   assert.deepEqual(execution.parts.map((part) => [part.target, part.status]), [["mcp", "success"], ["skill", "failed"]]);
   assert.equal(spawnCalls.length, 1);
-  assert.match(await readFile(join(root, "project", ".codex", "config.toml"), "utf8"), /@0\.2\.0/);
+  assert.match(await readFile(join(root, "project", ".codex", "config.toml"), "utf8"), /@latest/);
 });
 
 test("combined update preserves skill success when the MCP write fails (partial B)", async () => {
@@ -609,7 +629,7 @@ test("combined update preserves skill success when the MCP write fails (partial 
       now: () => new Date("2026-10-09T00:00:00.000Z"),
       packageVersion: VERSION,
       packageRoot: pkg,
-      launch: { command: "npx", args: ["-y", `@zguiyang/pi-task-exec@${VERSION}`, "mcp", "serve"] },
+      launch: { command: "npx", args: ["-y", `@zguiyang/pi-task-exec@latest`, "mcp", "serve"] },
       launchMode: "npm",
       localDev: false,
       releaseTagPreflight: async () => ({ ok: true }),
@@ -683,7 +703,7 @@ test("update with nothing installed is a no-op that never asks for confirmation"
 test("update with both components already current is a no-op that never asks for confirmation", async () => {
   const root = await makeRoot();
   const pkg = await makePackageRoot(root);
-  await seedCodex(root, VERSION);
+  await seedCodex(root, "latest");
   const target = await seedSkill(root, { scope: "project", ref: targetRef });
   const beforeConfig = await readFile(join(root, "project", ".codex", "config.toml"), "utf8");
   const beforeSkill = await readFile(join(target.installDir, "SKILL.md"), "utf8");
@@ -781,7 +801,7 @@ test("a missing or unverifiable release tag conflicts the complete update before
   assert.deepEqual(action, { kind: "exit", code: 1 });
   const [plan, execution] = jsonBlocks(captured.stdout());
   assert.equal(plan.conflicts[0].code, "release_tag_missing");
-  assert.match(plan.conflicts[0].message, /missing v0\.2\.0/);
+  assert.match(plan.conflicts[0].message, /missing v0\.2\.1/);
   assert.equal(execution.status, "conflict");
   assert.equal(calls.length, 0, "no Skills CLI spawn after a failed tag preflight");
   assert.equal(await readFile(configPath, "utf8"), beforeConfig);
@@ -802,7 +822,7 @@ test("a missing release tag does not block an MCP-only update (Skill absent)", a
   assert.equal(plan.conflicts.length, 0, "an unrelated GitHub tag must not block an MCP-only update");
   assert.deepEqual(preflightCalls, [], "no Skill update means no release tag preflight");
   assert.equal(execution.status, "success");
-  assert.match(await readFile(configPath, "utf8"), /@0\.2\.0/);
+  assert.match(await readFile(configPath, "utf8"), /@latest/);
 });
 
 // ---------------------------------------------------------------------------
@@ -837,10 +857,10 @@ test("the text preview shows current/target refs, managed key/path, scope impact
   const text = captured.stdout();
   assert.match(text, /Pi TaskExec Update/);
   assert.match(text, /current: @zguiyang\/pi-task-exec@0\.0\.9/);
-  assert.match(text, /target: @zguiyang\/pi-task-exec@0\.2\.0/);
+  assert.match(text, /target: @zguiyang\/pi-task-exec@latest/);
   assert.match(text, /Update .*config\.toml/);
   assert.match(text, /current: v0\.0\.9/);
-  assert.match(text, /target: v0\.2\.0/);
+  assert.match(text, /target: v0\.2\.1/);
   assert.match(text, /existing local changes may be lost/);
   assert.match(text, /Update MCP \+ Skill · Codex · project/);
 });

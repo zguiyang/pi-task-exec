@@ -1,7 +1,7 @@
 import type { McpEntryPlanResult, McpPlanInput, McpRemovalPlanResult, McpUpdatePlanResult } from "./adapters.js";
 import { SERVER_ID } from "../identity.js";
 import type { HostContext, PlanConflict, PlanWarning, Scope } from "../plan/model.js";
-import { BaseHostAdapter, absoluteEnvPath, classifyManagedEntry, retainManagedLaunchOptions, deepEqual, envPath, pathForPlatform, type HostInspection } from "./shared.js";
+import { BaseHostAdapter, absoluteEnvPath, classifyManagedUpdateEntry, retainManagedLaunchOptions, deepEqual, envPath, pathForPlatform, type HostInspection } from "./shared.js";
 import { parseToml, readTomlEntry, removeTomlTable, TomlEditError, upsertTomlTable } from "./toml.js";
 
 const TABLE_PATH = ["mcp_servers", SERVER_ID] as const;
@@ -95,18 +95,18 @@ export class CodexHostAdapter extends BaseHostAdapter {
     if (!parsed.ok) return { kind: "conflict", conflict: parsed.conflict };
     const existing = parsed.entry;
     if (!existing) return { kind: "absent", path };
-    const managed = classifyManagedEntry(existing, "codex");
+    const managed = classifyManagedUpdateEntry(existing, "codex");
     if (!managed) {
       return {
         kind: "conflict",
         conflict: conflict(
           path,
           "mcp_entry_conflict",
-          `An existing mcp_servers.${SERVER_ID} entry at ${path} cannot be proven managed (unknown fields, env, or changed args); refusing to update it.`,
+          `An existing mcp_servers.${SERVER_ID} entry at ${path} does not have a recognized Pi TaskExec launcher; refusing to replace another command.`,
         ),
       };
     }
-    const canonical = this.canonicalEntry(retainManagedLaunchOptions(existing, input.launch, "codex"));
+    const canonical = { ...existing, ...this.canonicalEntry(retainManagedLaunchOptions(existing, input.launch, "codex")) };
     if (deepEqual(existing, canonical)) return { kind: "no-op", path, current: managed.current, warnings };
     try {
       const content = upsertTomlTable(input.currentContent ?? "", TABLE_PATH, canonical, ["command", "args"]);
@@ -152,7 +152,7 @@ export class CodexHostAdapter extends BaseHostAdapter {
       return { entryPresent: false, managed: false, parseError: error instanceof Error ? error.message : String(error), notes: [] };
     }
     if (!entry) return { entryPresent: false, managed: false, notes: [] };
-    const managed = deepEqual(entry, this.canonicalEntry(retainManagedLaunchOptions(entry, launch, "codex")));
+    const managed = classifyManagedUpdateEntry(entry, "codex") !== null && deepEqual(entry, { ...entry, ...this.canonicalEntry(retainManagedLaunchOptions(entry, launch, "codex")) });
     const notes = managed ? [] : [`Existing mcp_servers.${SERVER_ID} entry does not match the exact managed fingerprint.`];
     return { entryPresent: true, managed, notes };
   }
