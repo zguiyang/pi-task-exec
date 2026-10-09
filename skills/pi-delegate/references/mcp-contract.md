@@ -1,7 +1,7 @@
-# Pi TaskExec MCP contract (v0.1.0)
+# Pi TaskExec MCP contract (v0.2.0)
 
 This reference describes the public interface of
-[`@zguiyang/pi-task-exec` v0.1.0](https://github.com/zguiyang/pi-task-exec/tree/v0.1.0).
+[`@zguiyang/pi-task-exec` v0.2.0](https://github.com/zguiyang/pi-task-exec/tree/v0.2.0).
 It is deliberately a delegation aid, not a second implementation of the
 runtime.
 
@@ -11,14 +11,14 @@ Run the unified setup flow for the chosen Agent and scope to install both the
 MCP and this Skill:
 
 ```text
-npx -y @zguiyang/pi-task-exec@0.1.0 setup
+npx -y @zguiyang/pi-task-exec@0.2.0 setup
 ```
 
 For a direct Host configuration, the stdio launch contract is:
 
 ```text
 command: npx
-args:    -y @zguiyang/pi-task-exec@0.1.0 mcp serve
+args:    -y @zguiyang/pi-task-exec@0.2.0 mcp serve
 ```
 
 The Host starts the MCP. Do not run this launch command from the Skill. The
@@ -85,9 +85,13 @@ is conceptually read-only. `implement` has `read`, `edit`, `write`, `bash`,
 command-generated files and side effects. Mode and profile are selected at
 spawn and are not changed by `pi_continue`.
 
-The supplied `cwd` must be an existing absolute directory inside
-`PI_WORKER_ALLOWED_ROOTS` (or the runtime's default allowed root). That path
-check is not an OS sandbox. There is no `allowedWriteScope` input: state the
+The supplied `cwd` must be an existing absolute directory inside the allowed
+roots. Explicit `PI_WORKER_ALLOWED_ROOTS` takes precedence, including an empty
+value that denies all directories. Otherwise, Host-provided MCP Roots are used
+when negotiated; empty, invalid or unavailable Roots deny Worker starts. Hosts
+without Roots use the MCP server's cwd. Global installation does not grant
+access to all projects. The real-path check is not an OS sandbox. There is no
+`allowedWriteScope` input: state the
 intended file boundary in `task`, then inspect actual changed files, newly
 created files, and effects on pre-existing user work. Task wording is not a
 filesystem sandbox, and an `implement` Worker can run `bash`.

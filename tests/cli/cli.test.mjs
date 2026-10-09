@@ -212,7 +212,7 @@ test("no arguments shows help, exits 0, and never requests the MCP runtime", asy
   const { deps, captured } = makeDeps(await makeRoot());
   const action = await runCli([], deps);
   assert.deepEqual(action, { kind: "exit", code: 0 });
-  assert.match(captured.stdout(), /pi-task-exec 0\.1\.0/);
+  assert.match(captured.stdout(), /pi-task-exec 0\.2\.0/);
   assert.match(captured.stdout(), /Usage:/);
   assert.match(captured.stdout(), /mcp serve/);
   assert.equal(captured.stderr(), "");
@@ -389,13 +389,13 @@ test("supported fake adapter writes on --yes, then is idempotent on a second run
   assert.deepEqual(firstAction, { kind: "exit", code: 0 });
   const configPath = join(root, "project", "config.json");
   const written = JSON.parse(await readFile(configPath, "utf8"));
-  assert.deepEqual(written.mcpServers["pi-task-exec"], { command: "npx", args: ["-y", "@zguiyang/pi-task-exec@0.1.0", "mcp", "serve"] });
+  assert.deepEqual(written.mcpServers["pi-task-exec"], { command: "npx", args: ["-y", "@zguiyang/pi-task-exec@0.2.0", "mcp", "serve"] });
 
   const second = makeDeps(root);
   const secondAction = await runCli(["add", "mcp", "--host", "codex", "--scope", "project", "--yes"], second.deps);
   assert.deepEqual(secondAction, { kind: "exit", code: 0 });
-  assert.match(second.captured.stdout(), /already has the pi-task-exec MCP entry|already_configured/);
-  assert.match(second.captured.stdout(), /Execution: no-op/);
+  assert.doesNotMatch(second.captured.stdout(), /already_configured|Launch mode:/);
+  assert.match(second.captured.stdout(), /No changes needed\./);
 });
 
 test("a plan conflict prevents the whole operation and reports an error", async () => {
@@ -533,11 +533,13 @@ test("entrypoint with no arguments prints help and does not start MCP", async ()
   assert.doesNotMatch(result.stderr, /started over MCP stdio/);
 });
 
-test("entrypoint with an unknown command exits non-zero with error and help", async () => {
+test("entrypoint with an unknown command exits non-zero with a concise error and help hint", async () => {
   const result = await runEntry(["uninstall"]);
   assert.equal(result.code, 1);
   assert.match(result.stderr, /Unknown command: uninstall/);
-  assert.match(result.stderr, /Usage:/);
+  assert.match(result.stderr, /^Error: Unknown command:/);
+  assert.match(result.stderr, /pi-task-exec --help/);
+  assert.doesNotMatch(result.stderr, /Commands:|Options:/);
   assert.doesNotMatch(result.stderr, /started over MCP stdio/);
 });
 

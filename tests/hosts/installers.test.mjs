@@ -154,7 +154,7 @@ test("Codex project install targets cwd/.codex/config.toml and warns about proje
   const toml = await readFile(path, "utf8");
   assert.match(toml, /\[mcp_servers\.pi-task-exec\]/);
   assert.match(toml, /command = "npx"/);
-  assert.match(toml, /args = \["-y", "@zguiyang\/pi-task-exec@0\.1\.0", "mcp", "serve"\]/);
+  assert.match(toml, /args = \["-y", "@zguiyang\/pi-task-exec@0\.2\.0", "mcp", "serve"\]/);
   assert.ok(blocks[0].warnings.some((warning) => warning.code === "project_trust_required"));
   assert.match(stdout, /trust/);
 });
@@ -205,7 +205,7 @@ test("Codex install is exact-content idempotent and refuses an old-version entry
 
   const path = join(root, "home", ".codex", "config.toml");
   const before = await readFile(path, "utf8");
-  await writeFile(path, before.replace(/@0\.1\.0/, "@0.0.9"));
+  await writeFile(path, before.replace(/@0\.2\.0/, "@0.0.9"));
   const third = await run(root, ["add", "mcp", "--host", "codex", "--scope", "global", "--yes", "--json"]);
   assert.deepEqual(third.action, { kind: "exit", code: 1 });
   assert.equal(third.blocks[0].conflicts[0].code, "mcp_entry_conflict");
@@ -224,7 +224,7 @@ test("Codex removal removes only the managed entry and preserves everything else
     "",
     "[mcp_servers.pi-task-exec]",
     'command = "npx"',
-    'args = ["-y", "@zguiyang/pi-task-exec@0.1.0", "mcp", "serve"]',
+    'args = ["-y", "@zguiyang/pi-task-exec@0.2.0", "mcp", "serve"]',
     "",
     "[history]",
     'persistence = "save-all"',
@@ -670,18 +670,13 @@ test("plan JSON exposes launch mode, platform, format, modified key, support, ba
   assert.match(plan.hostTarget.trustNote, /trust/i);
 });
 
-test("text plan shows the host target metadata", async () => {
+test("text plan shows actionable host details without dumping internal or empty fields", async () => {
   const root = await makeRoot();
   const { stdout } = await run(root, ["add", "mcp", "--host", "zed", "--scope", "global", "--dry-run"]);
-  assert.match(stdout, /Launch mode: npm/);
-  assert.match(stdout, /Host target: zed \(Zed\)/);
-  assert.match(stdout, /Platform: darwin/);
-  assert.match(stdout, /Config format: jsonc/);
-  assert.match(stdout, /Config key: context_servers\.pi-task-exec/);
-  assert.match(stdout, /Support: supported/);
-  assert.match(stdout, /Restart required: yes/);
-  assert.match(stdout, /Trust required: no/);
-  assert.match(stdout, /Backup strategy: none/);
+  assert.match(stdout, /Add MCP · Zed · global/);
+  assert.match(stdout, /Create .*settings\.json/);
+  assert.match(stdout, /Preview complete\. No files changed\./);
+  assert.doesNotMatch(stdout, /Launch mode:|Host target:|Backup strategy:|Restart required:|Trust required:|Platform:|Config format:|Config key:|\(none\)|plan\.v1/);
 });
 
 test("plan reports the timestamped-sibling backup strategy when an existing config will be changed", async () => {

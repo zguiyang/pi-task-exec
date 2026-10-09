@@ -1,7 +1,7 @@
 import type { McpEntryPlanResult, McpPlanInput, McpRemovalPlanResult, McpUpdatePlanResult } from "./adapters.js";
 import { SERVER_ID } from "../identity.js";
 import type { HostContext, PlanConflict, PlanWarning, Scope } from "../plan/model.js";
-import { BaseHostAdapter, absoluteEnvPath, classifyManagedEntry, deepEqual, envPath, pathForPlatform, type HostInspection } from "./shared.js";
+import { BaseHostAdapter, absoluteEnvPath, classifyManagedEntry, retainManagedLaunchOptions, deepEqual, envPath, pathForPlatform, type HostInspection } from "./shared.js";
 import { parseToml, readTomlEntry, removeTomlTable, TomlEditError, upsertTomlTable } from "./toml.js";
 
 const TABLE_PATH = ["mcp_servers", SERVER_ID] as const;
@@ -34,7 +34,7 @@ export class CodexHostAdapter extends BaseHostAdapter {
   }
 
   private canonicalEntry(launch: McpPlanInput["launch"]): Record<string, unknown> {
-    return { command: launch.command, args: [...launch.args] };
+    return { command: launch.command, args: [...launch.args], ...(launch.requireReady ? { required: true } : {}) };
   }
 
   protected entryKey(): string {
@@ -64,7 +64,7 @@ export class CodexHostAdapter extends BaseHostAdapter {
     const parsed = this.entryFrom(input, path);
     if (!parsed.ok) return { kind: "conflict", conflict: parsed.conflict };
     const existing = parsed.entry;
-    const canonical = this.canonicalEntry(input.launch);
+    const canonical = this.canonicalEntry(existing ? retainManagedLaunchOptions(existing, input.launch, "codex") : input.launch);
     if (existing) {
       if (!deepEqual(existing, canonical)) {
         return {
@@ -95,7 +95,7 @@ export class CodexHostAdapter extends BaseHostAdapter {
     if (!parsed.ok) return { kind: "conflict", conflict: parsed.conflict };
     const existing = parsed.entry;
     if (!existing) return { kind: "absent", path };
-    const managed = classifyManagedEntry(existing, "command-args");
+    const managed = classifyManagedEntry(existing, "codex");
     if (!managed) {
       return {
         kind: "conflict",
@@ -106,7 +106,7 @@ export class CodexHostAdapter extends BaseHostAdapter {
         ),
       };
     }
-    const canonical = this.canonicalEntry(input.launch);
+    const canonical = this.canonicalEntry(retainManagedLaunchOptions(existing, input.launch, "codex"));
     if (deepEqual(existing, canonical)) return { kind: "no-op", path, current: managed.current, warnings };
     try {
       const content = upsertTomlTable(input.currentContent ?? "", TABLE_PATH, canonical, ["command", "args"]);
@@ -124,7 +124,7 @@ export class CodexHostAdapter extends BaseHostAdapter {
     const parsed = this.entryFrom(input, path);
     if (!parsed.ok) return { kind: "conflict", conflict: parsed.conflict };
     if (!parsed.entry) return { kind: "ok", path, content: input.currentContent, changed: false, warnings };
-    if (!deepEqual(parsed.entry, this.canonicalEntry(input.launch))) {
+    if (!deepEqual(parsed.entry, this.canonicalEntry(retainManagedLaunchOptions(parsed.entry, input.launch, "codex")))) {
       return {
         kind: "conflict",
         conflict: conflict(
@@ -152,7 +152,7 @@ export class CodexHostAdapter extends BaseHostAdapter {
       return { entryPresent: false, managed: false, parseError: error instanceof Error ? error.message : String(error), notes: [] };
     }
     if (!entry) return { entryPresent: false, managed: false, notes: [] };
-    const managed = deepEqual(entry, this.canonicalEntry(launch));
+    const managed = deepEqual(entry, this.canonicalEntry(retainManagedLaunchOptions(entry, launch, "codex")));
     const notes = managed ? [] : [`Existing mcp_servers.${SERVER_ID} entry does not match the exact managed fingerprint.`];
     return { entryPresent: true, managed, notes };
   }

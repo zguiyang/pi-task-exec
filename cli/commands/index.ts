@@ -4,6 +4,7 @@ import type { SpawnFunction } from "./doctor.js";
 import { formatDoctor, runDoctor } from "./doctor.js";
 import { PACKAGE_NAME, PRODUCT_NAME, VERSION } from "../identity.js";
 import { defaultIo, type CliIo } from "../io.js";
+import { highlight } from "../presentation.js";
 import {
   formatPlan,
   generatePlan,
@@ -25,6 +26,9 @@ export { PACKAGE_NAME, PRODUCT_NAME, VERSION } from "../identity.js";
 export type { CliIo } from "../io.js";
 
 export interface CliOptions {
+  npmPrefix?: string;
+  requireMcp?: boolean;
+  probe?: boolean;
   host?: string;
   scope?: Scope;
   target?: PlanTarget;
@@ -52,6 +56,7 @@ export interface ParseOptions {
 }
 
 export interface CliDeps {
+  color?: boolean;
   io: CliIo;
   env: NodeJS.ProcessEnv;
   cwd: string;
@@ -100,6 +105,9 @@ Options:
   --yes                              Skip confirmation only after the plan is printed
   --interactive, -i                  Force prompting for missing selections (requires a TTY)
   --host <${KNOWN_HOST_IDS.join("|")}>
+  --probe                            Doctor only: probe package MCP handshake and tools; no Worker
+  --npm-prefix <absolute-directory>   Isolate npm resolution while preserving MCP cwd
+  --require-mcp                      Codex only: wait for MCP; failed startup blocks Host
   --scope <project|global>
   --target <mcp|skill|both>          (setup only; update always inspects both)
 
@@ -116,7 +124,7 @@ function commandHelp(topic: string): string {
     case "add skill":
       return `Usage:\n  ${PRODUCT_NAME} add skill [--host <${KNOWN_HOST_IDS.join("|")}>] [--scope <project|global>] [--dry-run] [--json] [--yes]\n\nPlan and install the bundled pi-delegate Skill through the pinned Vercel Skills CLI v1.7.1 from the fixed GitHub source. --host selects the Skill Agent (prompted on a TTY when omitted). The plan is printed, existing paths require a default-No confirmation, and the real result (files, pinned source/ref, lockfile) is verified.`;
     case "remove mcp":
-      return `Usage:\n  ${PRODUCT_NAME} remove mcp --host <${KNOWN_HOST_IDS.join("|")}> --scope <project|global> [--dry-run] [--json] [--yes]\n\nPlan and remove the pi-task-exec MCP entry for an explicit host and scope. Only an entry created by pi-task-exec (managed fingerprint) is removed; user entries are left untouched.`;
+      return `Usage:\n  ${PRODUCT_NAME} remove mcp [--host <${KNOWN_HOST_IDS.join("|")}>] [--scope <project|global>] [--dry-run] [--json] [--yes]\n\nOn a TTY, select Agent and Scope, review the removal plan, then confirm. Non-interactive and --json commands require explicit selections. Only the managed pi-task-exec MCP entry is removed; unrelated settings are preserved.`;
     case "remove skill":
       return `Usage:\n  ${PRODUCT_NAME} remove skill --scope <project|global> [--dry-run] [--json] [--yes]\n\nPlan and (when available) remove the managed pi-delegate skill.`;
     case "setup":
@@ -124,7 +132,7 @@ function commandHelp(topic: string): string {
     case "update":
       return `Usage:\n  ${PRODUCT_NAME} update [--host <${KNOWN_HOST_IDS.join("|")}>] [--scope <project|global>] [--dry-run] [--json] [--yes]\n\nAlways inspect both installed components (MCP and Skill); there is no component-selection override. Only a provably managed MCP entry and a lockfile-owned Skill are updated; absent components are never installed and point you at setup. On a TTY a missing Agent/Scope is prompted; --json fails instead of prompting. In release mode the exact v<packageVersion> GitHub tag is preflighted before a Skill update and before any MCP write in the same plan.`;
     case "doctor":
-      return `Usage:\n  ${PRODUCT_NAME} doctor [--json]\n\nRead-only check of Node, Pi, Git, package/platform/version contract, host adapter capability, and skill target status. Never prints config secrets or file contents.`;
+      return `Usage:\n  ${PRODUCT_NAME} doctor [--json] [--probe]\n\nRead-only check of Node, Pi, Git, package/platform/version contract, host adapter capability, and skill target status. Never prints config secrets or file contents. --probe explicitly starts the package MCP for initialize, tools/list and pi_list, never a Worker.`;
     default:
       return helpText();
   }
@@ -187,6 +195,14 @@ export function parseCli(args: string[], parseOptions: ParseOptions = {}): Parse
         options.dryRun = true;
       } else if (name === "--local-dev") {
         options.localDev = true;
+      } else if (name === "--npm-prefix") {
+        const taken = takeValue();
+        if (taken.error) return taken.error;
+        if (taken.value !== undefined) options.npmPrefix = taken.value;
+      } else if (name === "--require-mcp") {
+        options.requireMcp = true;
+      } else if (name === "--probe") {
+        options.probe = true;
       } else if (name === "--interactive") {
         options.interactive = true;
       } else if (name === "--yes") {
@@ -251,6 +267,9 @@ export function parseCli(args: string[], parseOptions: ParseOptions = {}): Parse
   const [first, second, ...rest] = positionals;
   const unknown = (): ParsedCli => errorResult("unknown_command", `Unknown command: ${positionals.join(" ")}`, options.json);
 
+  if (options.probe && first !== "doctor") return errorResult("unexpected_option", "--probe is only valid for doctor.", options.json);
+  if (options.requireMcp && (first === "doctor" || first === "remove" || first === "mcp")) return errorResult("unexpected_option", "--require-mcp is only valid when installing/updating an MCP entry.", options.json);
+  if (options.npmPrefix !== undefined && (first === "mcp" || (first === "add" && second === "skill"))) return errorResult("unexpected_option", "--npm-prefix applies only to MCP installation/update or doctor.", options.json);
   if (first === "mcp") {
     if (second === "serve" && rest.length === 0) return { kind: "serve" };
     return unknown();
@@ -259,10 +278,9 @@ export function parseCli(args: string[], parseOptions: ParseOptions = {}): Parse
     if (rest.length > 0) return unknown();
     if (second !== "mcp" && second !== "skill") return unknown();
     if (options.target !== undefined) return errorResult("unexpected_option", `--target is only valid for setup.`, options.json);
-    // `remove` is never prompted, and the non-interactive mode keeps the exact
-    // missing-selection errors. `add mcp`/`add skill` leave them unset so the
-    // runtime can prompt for Agent/Scope.
-    if (first === "remove" || !interactive) {
+    // Interactive MCP removal selects Agent/Scope before plan confirmation.
+    // Parameter-only removal still requires explicit targets.
+    if (!interactive || (first === "remove" && second === "skill")) {
       if (second === "mcp") {
         if (options.host === undefined) return errorResult("missing_host", `${first} mcp requires an explicit --host ${KNOWN_HOST_IDS.join("|")}.`, options.json);
         if (options.scope === undefined) return errorResult("missing_scope", `${first} mcp requires an explicit --scope project|global.`, options.json);
@@ -320,12 +338,12 @@ function parsedJson(parsed: ParsedCli): boolean {
   return false;
 }
 
-function printError(io: CliIo, code: string, message: string, json: boolean): void {
+function printError(io: CliIo, code: string, message: string, json: boolean, color = false): void {
   if (json) {
     io.stdout(`${JSON.stringify({ error: { code, message } }, null, 2)}\n`);
   } else {
-    io.stderr(`${message}\n`);
-    io.stderr(`${helpText()}\n`);
+    io.stderr(`${highlight(`Error: ${message}`, "red", color)}\n`);
+    io.stderr(`Run ${PRODUCT_NAME} --help for usage.\n`);
   }
 }
 
@@ -407,9 +425,11 @@ async function runCommand(parsed: Extract<ParsedCli, { kind: "command" }>, deps:
       now: deps.now,
       packageRoot: deps.packageRoot,
       packageVersion: deps.packageVersion,
+      probe: options.probe === true,
+      ...(options.npmPrefix !== undefined ? { npmPrefix: options.npmPrefix } : {}),
     });
     deps.io.stdout(options.json ? `${JSON.stringify(report, null, 2)}\n` : `${formatDoctor(report)}\n`);
-    return { kind: "exit", code: 0 };
+    return { kind: "exit", code: report.probe?.status === "fail" ? 1 : 0 };
   }
 
   const interaction = deps.interaction;
@@ -421,7 +441,7 @@ async function runCommand(parsed: Extract<ParsedCli, { kind: "command" }>, deps:
     return { kind: "exit", code: 0 };
   };
   const missing = (code: string, message: string): CliAction => {
-    printError(deps.io, code, message, options.json);
+    printError(deps.io, code, message, options.json, deps.color);
     return { kind: "exit", code: 1 };
   };
 
@@ -463,11 +483,16 @@ async function runCommand(parsed: Extract<ParsedCli, { kind: "command" }>, deps:
     scope = chosen;
   }
 
+  if (options.requireMcp && (host !== "codex" || target === "skill")) {
+    return missing("unsupported_readiness", "--require-mcp requires a Codex MCP target; other Hosts use their own native readiness policy.");
+  }
   const { launch, mode: launchMode } = resolveLaunchSpec({
     packageRoot: deps.packageRoot,
     packageVersion: deps.packageVersion,
     env: deps.env,
     ...(deps.launchMode !== undefined ? { mode: deps.launchMode } : {}),
+    ...(options.npmPrefix !== undefined ? { npmPrefix: options.npmPrefix } : {}),
+    ...(options.requireMcp ? { requireReady: true } : {}),
   });
 
   const plan = await generatePlan(
@@ -492,11 +517,13 @@ async function runCommand(parsed: Extract<ParsedCli, { kind: "command" }>, deps:
     },
   );
 
+  if (options.requireMcp) plan.warnings.push({ code: "required_mcp", message: "Codex will wait for this MCP. If initialization fails, Host startup/resume fails too. Other MCP entries are unaffected." });
+  if (options.npmPrefix) plan.warnings.push({ code: "npm_resolution_prefix", message: `npm package resolution uses ${options.npmPrefix}; MCP cwd is unchanged. This directory must exist on every machine using this configuration.` });
   // The plan is always printed before confirmation or any write.
-  deps.io.stdout(options.json ? `${planJson(plan)}\n` : `${formatPlan(plan)}\n`);
+  deps.io.stdout(options.json ? `${planJson(plan)}\n` : `${formatPlan(plan, deps.color)}\n`);
 
   const roots = executionRoots(deps, host, scope, target, context);
-  const confirm = interaction !== undefined
+  const confirm = interaction !== undefined && !options.json
     ? async (confirmPlan: import("../plan/model.js").InstallPlan, safety?: SafetyConfirmation): Promise<boolean> => {
         if (safety) deps.io.stdout(`${safety.message}\n`);
         return interaction.confirm(safety ? "Replace the listed path(s)?" : "Proceed with this plan?", false);
@@ -517,8 +544,13 @@ async function runCommand(parsed: Extract<ParsedCli, { kind: "command" }>, deps:
     skillPackageRoot: deps.packageRoot,
   });
 
-  deps.io.stdout(options.json ? `${JSON.stringify(serializeExecution(result), null, 2)}\n` : `${formatExecution(result)}\n`);
-  if (result.status === "cancelled" && interaction !== undefined) return cancelled();
+  const execution = serializeExecution(result);
+  if (target !== "skill" && operation !== "remove") execution.mcpVerification = { connection: "not-tested", hostToolExposure: "not-tested" };
+  deps.io.stdout(options.json ? `${JSON.stringify(execution, null, 2)}\n` : `${formatExecution(result, deps.color)}\n`);
+  if (!options.json && target !== "skill" && operation !== "remove" && ["success", "partial"].includes(result.status) && (result.parts.length ? result.parts.some((part) => part.target === "mcp" && part.performed.length > 0) : result.performed.length > 0)) {
+    deps.io.stdout(`Restart ${plan.hostTarget?.displayName ?? host}, then verify pi_list there.\n`);
+  }
+  if (result.status === "cancelled" && canPrompt) return { kind: "exit", code: 0 };
   const code = result.status === "success" || result.status === "no-op" || result.status === "dry-run" ? 0 : 1;
   return { kind: "exit", code };
 }
@@ -530,7 +562,7 @@ export async function runCli(args: string[], depsInput?: Partial<CliDeps>): Prom
     const deps = ensureDeps(depsInput);
     switch (parsed.kind) {
       case "error":
-        printError(deps.io, parsed.code, parsed.message, parsed.json);
+        printError(deps.io, parsed.code, parsed.message, parsed.json, deps.color);
         return { kind: "exit", code: 1 };
       case "help":
         deps.io.stdout(`${parsed.topic ? commandHelp(parsed.topic) : helpText()}\n`);
@@ -547,7 +579,7 @@ export async function runCli(args: string[], depsInput?: Partial<CliDeps>): Prom
     const message = error instanceof Error ? error.message : String(error);
     const code = error && typeof error === "object" && "code" in error && typeof error.code === "string" ? error.code : "internal_error";
     const io = depsInput?.io ?? defaultIo;
-    printError(io, code, message, parsedJson(parsed));
+    printError(io, code, message, parsedJson(parsed), depsInput?.color);
     return { kind: "exit", code: 1 };
   }
 }

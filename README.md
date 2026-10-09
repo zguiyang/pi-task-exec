@@ -16,28 +16,13 @@ status/result → Supervisor review and acceptance. `inspect`/`implement` are
 tool capability profiles and `direct`/`worktree` are working-directory modes;
 neither is an operating-system security sandbox.
 
-> Status: Phases 6–8 and the 2026-10-09 root-level directory refactor (layout
-> A: root `cli/`, `mcp/`, `skills/`, `tests/`, `docs/`, and root `dist/`) are
-> implemented in this checkout. Stage 8 adds real Codex, Zed, and OpenCode MCP
-> implement/remove with safe TOML/JSONC merging, backups, and managed-entry
-> removal. Stage 9A adds `add skill`: it installs `pi-delegate` through the
-> pinned Vercel Skills CLI v1.7.1 from the fixed GitHub source. Stage 9B adds
-> the interactive unified `setup`. The Stage 9A+9B baseline is committed as
-> `a8b77e9`, and the isolated real Setup Smoke for 09B passed and was cleaned
-> up. Stage 9C adds the unified in-place `update` for already-installed
-> components; it is still uncommitted and awaits Supervisor review, and no real
-> 09C update installation has been verified. `remove skill` remains deferred.
-> Stage 10
-> (MCP/Skill contract synchronization and tool renaming) has not started. The
-> npm package and MCP Registry entry have not been published. Local tarball
-> prepack, archive-content checks, and a separate clean npm prefix installation
-> with full MCP initialize/list-tools smoke have passed for the current `pi_*`
-> contract. For current development, build from
-> source and run `node dist/cli/index.js mcp serve`; `dist/` is generated
-> output from `cli/` and `mcp/`. When run from this checkout the installer
-> writes a `node <absolute-checkout>/dist/cli/index.js mcp serve` launch entry
-> only when `--local-dev` is passed, and never represents that local path as the
-> published npm package.
+Pi TaskExec is distributed through npm and the MCP Registry, with GitHub tags
+and releases providing the matching Skill source. Version 0.2.0 improves
+interactive setup/removal, connection diagnostics, and Host-provided workspace
+Roots while preserving all six `pi_*` tools. `remove skill` remains deferred.
+
+For source development, build first and use `--local-dev` when installing a
+local launch entry. Published installations use a pinned npm package version.
 
 ## CLI surface
 
@@ -49,18 +34,18 @@ the MCP Registry entry. All six MCP tools (`pi_spawn`, `pi_status`,
 | --- | --- |
 | `pi-task-exec` (no arguments) | Prints help and exits `0`; never starts MCP. |
 | `pi-task-exec --help` | Prints help and exits `0`; never starts MCP. |
-| `pi-task-exec --version` | Prints only `0.1.0` and exits `0`; never starts MCP. |
+| `pi-task-exec --version` | Prints only `0.2.0` and exits `0`; never starts MCP. |
 | `pi-task-exec mcp serve` | Starts the existing MCP stdio runtime. |
-| `pi-task-exec doctor [--json]` | Read-only environment, host, skill, and version-contract check; never starts MCP. |
+| `pi-task-exec doctor [--json] [--probe]` | Default: read-only environment/config check. Explicit `--probe`: starts the package MCP for handshake, discovery and `pi_list`, then shuts it down; never creates Workers. |
 | `pi-task-exec add mcp [--host <codex\|zed\|opencode>] [--scope <project\|global>] [--dry-run] [--json] [--yes]` | Plans and safely merges the host MCP entry (stage 8); never starts MCP. On a TTY, a missing `--host`/`--scope` is an arrow-key prompt; `--json` fails instead of prompting. |
-| `pi-task-exec remove mcp --host <...> --scope <...>` | Plans removal of only the managed host MCP entry; never starts MCP. |
+| `pi-task-exec remove mcp [--host <...>] [--scope <...>]` | Selects Agent/Scope on a TTY, shows the removal plan, then asks for confirmation; only removes the managed MCP entry. Non-TTY/JSON require explicit selections; never starts MCP. |
 | `pi-task-exec add skill [--host <codex\|zed\|opencode>] [--scope <project\|global>] [--dry-run] [--json] [--yes]` | Plans and installs the `pi-delegate` Skill through the pinned Vercel Skills CLI v1.7.1 from the fixed GitHub source; never starts MCP. On a TTY, a missing `--host`/`--scope` is an arrow-key prompt. |
 | `pi-task-exec remove skill --scope <project\|global>` | Plans skill removal through the installer seam; stage 9A leaves this deferred. |
 | `pi-task-exec setup [--target <mcp\|skill\|both>] [--host <...>] [--scope <...>]` | Plans the unified MCP + Skill setup in one plan by default. On a TTY, only missing Agent/Scope are arrow-key prompts; `--target` is an explicit non-interactive override. |
 | `pi-task-exec update [--host <...>] [--scope <...>] [--dry-run] [--json] [--yes]` | Plans in-place updates for both already-installed components; there is no component-selection override. Discovers only managed components; absent ones are never installed and point at `setup`. In release mode the exact `v<packageVersion>` GitHub tag is preflighted before a Skill update and before any MCP write in the same plan. |
 
-Only the explicit `mcp serve` route initializes and starts the MCP runtime.
-Ordinary `help`, `--version`, `add`, `remove`, `setup`, `update`, and `doctor`
+The `mcp serve` route starts the MCP runtime. `doctor --probe` explicitly starts a temporary package runtime for connection verification.
+Ordinary `help`, `--version`, `add`, `remove`, `setup`, `update`, and plain `doctor`
 do not
 start MCP. Running `pi-task-exec` with no arguments prints help and does not
 start MCP.
@@ -121,9 +106,9 @@ Prerequisites: Node.js 22.20+, a locally installed and configured `pi` executabl
 and Git when using isolated worktrees. The Skill installer invokes the pinned
 `skills@1.7.1` CLI, which also requires Node.js 22.20+.
 
-The npm package has not been published, so it cannot currently be installed
-from npm. The `add`/`remove`/`setup` commands perform real host configuration
-writes, after printing the plan and revalidating it.
+Run `npx -y @zguiyang/pi-task-exec@0.2.0 setup` from the project you want to
+configure. The `add`/`remove`/`setup` commands perform real configuration writes
+only after showing the plan and obtaining approval.
 
 From an installed package the launch entry is the npm stdio contract:
 
@@ -132,11 +117,11 @@ command: npx
 args:    -y @zguiyang/pi-task-exec@<version> mcp serve
 ```
 
-The v0.1.0 release launch is:
+The v0.2.0 release launch is:
 
 ```text
 command: npx
-args:    -y @zguiyang/pi-task-exec@0.1.0 mcp serve
+args:    -y @zguiyang/pi-task-exec@0.2.0 mcp serve
 ```
 
 From this source checkout, build first and launch the compiled CLI directly:
@@ -159,6 +144,62 @@ installer never represents that local path as the published npm package. From
 an installed package it writes the
 `npx -y @zguiyang/pi-task-exec@<version> mcp serve` entry. `doctor` is a
 read-only check and does not modify any host configuration.
+
+## Connection diagnostics and optional launch controls
+
+MCP/Skill installation scope is separate from runtime cwd and Worker permissions.
+Global configuration makes the tools available across projects; it does not grant
+Workers access to all projects. Project configurations use the same published
+launch contract as global configurations, with Host-native paths and trust rules.
+
+The CLI uses `@clack/prompts` for TTY selection and confirmation, loaded only
+when a prompt is needed. It restores raw input mode/cursor state on cancellation,
+stream failure, and handled interruption. Parameter mode, non-TTY operation and
+`--json` do not require a prompt library. JSON output never invokes terminal
+prompts; path replacement protections still apply and cannot be bypassed by
+`--yes`.
+
+Normal output shows a short plan with destinations and important approval notes,
+then confirmation and a concise result. Internal launch/config metadata remains
+available through `--json` and `doctor`; failures show relevant error details and
+any completed changes or recovery information.
+
+Plain `doctor` checks configuration and reports possible same-name/version npm
+root-package collisions. `doctor --probe` verifies the **package runtime selected
+by the CLI**, not the currently running Host connection: initialize, tools/list,
+and pi_list, without creating a Worker. It bounds the probe and shuts down the
+process afterward. Probe failures return a nonzero exit; ordinary diagnostic
+reports retain their existing exit behavior. A successful probe does not prove
+that an Agent Host has exposed the tools to its model. Verify pi_list inside the
+Host after its required trust/restart steps.
+
+For a published package affected by npm's local-package resolution, the optional
+`--npm-prefix <existing-absolute-directory>` on MCP installation/update selects
+an independent npm resolution directory. It must contain neither package.json
+nor node_modules. The installer does not create it, and npm continues to launch
+the MCP in the Host's cwd. Ordinary installs retain the standard npx command.
+The prefix is machine-local: use it for a local configuration or ensure that the
+same path exists on every machine sharing a project configuration. For source
+checkout development, prefer explicit --local-dev.
+
+`--require-mcp` on Codex MCP installation/update writes the native `required =
+true` field. The plan warns that failed initialization will then block Host
+startup/resume. It is opt-in and does not modify other MCP servers or global
+Host timing settings. Other Hosts reject this option rather than receiving
+unsupported fields. Managed updates retain previously selected npm prefixes and
+readiness settings; unknown fields remain protected as configuration drift.
+
+Installation output distinguishes saved configuration from untested connection
+and untested Host tool exposure. It never silently starts a Worker to check an
+installation.
+
+When the Host advertises MCP Roots, TaskExec requests its directory list after
+initialization and handles roots/list_changed. Explicit PI_WORKER_ALLOWED_ROOTS
+always wins. Without it, valid Roots replace the cwd fallback; empty, unavailable
+or invalid negotiated Roots deny Worker starts rather than expanding access.
+Hosts without Roots retain the server-cwd fallback. Real paths are checked, so
+symlink escapes are rejected. Roots changes affect future Worker starts and do
+not terminate already-running Workers. These checks are not an OS sandbox.
 
 ## Host configuration reference
 
@@ -304,7 +345,7 @@ for `--json`/non-interactive runs.
 | `PI_WORKER_RPC_TIMEOUT_MS` | `15000` | Per-RPC timeout |
 | `PI_WORKER_IDLE_TIMEOUT_MS` | `600000` | Idle deadline; `0` disables it |
 | `PI_WORKER_TASK_TIMEOUT_MS` | `3600000` | Activity-cycle deadline |
-| `PI_WORKER_ALLOWED_ROOTS` | current directory | Path-delimited allowed roots |
+| `PI_WORKER_ALLOWED_ROOTS` | Host Roots if negotiated, otherwise server cwd | Explicit path-delimited allowed roots override Host Roots; an explicit empty value denies all directories |
 
 No secret environment variable is required; Pi reads its own local
 authentication configuration.
@@ -336,47 +377,18 @@ configuration.
 | MCP Registry name | `io.github.zguiyang/pi-task-exec` |
 | Skill | `pi-delegate` |
 
-Phase 1 (2026-10-08) resolved the naming, identity, and Skill-licensing
-questions with the following evidence:
+## Distribution and limitations
 
-- `npm view @zguiyang/pi-task-exec` returned **E404**, meaning no package is
-  currently published under that exact name. This is a current availability
-  fact only, not a reservation, release entitlement, or guarantee against
-  future registration.
-- Exact MCP Registry search for `io.github.zguiyang/pi-task-exec` returned
-  HTTP 200 with `count: 0`; no matching record exists.
-- Official `mcp-publisher validate` on the target Registry name and npm package
-  identifier passed.
-- Publishing identity was confirmed: `gh api user` reports `zguiyang`,
-  `gh repo view` reports the repository as PUBLIC with ADMIN access,
-  `npm whoami` reports `zhaoguiyang`, and `npm org ls zguiyang` lists that
-  account as owner.
-- JoeyZhao confirmed direct authorship and copyright of the Skill, MIT
-  redistribution, and that no separate NOTICE is required.
+The npm package, GitHub release tag, and MCP Registry metadata use the same
+version. `server.json.name` matches `package.json.mcpName`; the Registry points
+to the published npm artifact rather than hosting the runtime itself.
 
-Neither the npm package nor any MCP Registry record has been published yet.
-Actual Registry OAuth/OIDC publishing has not been attempted; that future
-workflow will require the `id-token: write` permission. The checks above are
-evidence of the current state, not a release commitment, and the project must
-still stop rather than fall back to an old name if the target Registry ID is
-occupied at publication time.
-
-## Current status and non-claims
-
-Phases 6–8 and stage 9A are implemented in this checkout. The following are
-**not** implemented and are **not** claimed:
-
-- the npm tarball has been generated locally, but the package has not been
-  published and cannot currently be installed from npm; no MCP Registry record
-  has been published;
-- stage 9A implements `add skill`, stage 9B implements the interactive
-  unified `setup`, and stage 9C implements the unified in-place `update`;
-  `remove skill` remains deferred and reports unsupported;
-- the Skills CLI install is not transactional and is not rolled back;
-- stage 10 tool migration has not started; the existing `pi_*` tools remain
-  and migration to `task_*` is planned for that stage;
-- `doctor` is read-only and does not prove that a host configuration works;
-- no release or version compatibility promise.
+- Project/global MCP and Skill installation supports Codex, Zed, and OpenCode.
+- `remove skill` remains deferred and reports unsupported.
+- Skill installation is not transactional; no cross-component rollback is promised.
+- The existing six `pi_*` tool names are retained.
+- Saving a configuration does not establish a live Host connection; use
+  `doctor --probe` to check the package runtime, and verify `pi_list` in the Host.
 
 ## Repository layout and responsibilities
 
@@ -437,7 +449,8 @@ from a clean temporary directory; `npm link` is not package acceptance. The
 `prepack` script rebuilds the root `dist/` so the tarball contains the thin
 `bin/`, root `dist/**`, the complete `skills/pi-delegate/**`, and the required
 root documents, licenses, and `server.json`. npm publication and MCP Registry
-publication are separate, explicit actions and have not occurred.
+publication are separate steps; publish the npm artifact before registering its
+new version in the MCP Registry.
 
 ## Registry metadata
 

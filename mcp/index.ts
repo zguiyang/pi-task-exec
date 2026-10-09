@@ -15,6 +15,16 @@ export async function serveMcp(): Promise<void> {
   );
   registerTools(server, manager);
 
+  const refreshRoots = (): void => {
+    if (!server.server.getClientCapabilities()?.roots) return;
+    void manager.refreshClientRoots(async () => {
+      const result = await server.server.listRoots(undefined, { timeout: 5_000 });
+      return result.roots.map((root) => root.uri);
+    }).catch((error) => console.error(`${MCP_SERVER_NAME} workspace roots unavailable:`, error instanceof Error ? error.message : String(error)));
+  };
+  server.server.oninitialized = refreshRoots;
+  server.server.setNotificationHandler("notifications/roots/list_changed", refreshRoots);
+
   console.error(`${MCP_SERVER_NAME} started over MCP stdio`);
   let shutdownPromise: Promise<void> | undefined;
   const stdio = serveStdio(() => server, { onerror: (error) => console.error(`${MCP_SERVER_NAME} transport error:`, error) });

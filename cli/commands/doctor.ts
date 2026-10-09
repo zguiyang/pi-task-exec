@@ -5,6 +5,7 @@ import type { DoctorCheck, HostAdapter } from "../hosts/adapters.js";
 import type { HostContext, Scope } from "../plan/model.js";
 import { skillTargetDir, resolveLaunchSpec } from "../plan/model.js";
 import type { SkillInstaller } from "../installers/skill.js";
+import { probeMcp, type ProbeResult } from "./probe.js";
 import { PACKAGE_NAME, SERVER_NAME, SKILL_NAME, VERSION } from "../identity.js";
 
 export interface ProcessResult {
@@ -54,6 +55,8 @@ export interface DoctorDependencies {
   now: () => Date;
   packageRoot: string;
   packageVersion: string;
+  probe?: boolean;
+  npmPrefix?: string;
 }
 
 export interface DoctorReport {
@@ -65,6 +68,7 @@ export interface DoctorReport {
   tools: DoctorCheck[];
   hosts: DoctorCheck[];
   skill: DoctorCheck[];
+  probe?: ProbeResult;
   ok: boolean;
 }
 
@@ -185,7 +189,11 @@ export async function runDoctor(deps: DoctorDependencies): Promise<DoctorReport>
   ];
 
   const hosts: DoctorCheck[] = [];
-  const { launch } = resolveLaunchSpec({ packageRoot: deps.packageRoot, packageVersion: deps.packageVersion, env: context.env });
+  const { launch } = resolveLaunchSpec({ packageRoot: deps.packageRoot, packageVersion: deps.packageVersion, env: context.env, ...(deps.npmPrefix ? { npmPrefix: deps.npmPrefix } : {}) });
+  const currentPackage = await readJson(join(context.cwd, "package.json"));
+  if (currentPackage?.name === PACKAGE_NAME && currentPackage.version === deps.packageVersion && !deps.npmPrefix) {
+    tools.push({ id: "runtime.npmCollision", label: "Published npm launch in this workspace", status: "warn", detail: "Same-name/version root package can shadow npx cache and cause command not found. Use explicit --local-dev for source development, or an existing independent --npm-prefix for published npm installation. MCP cwd must stay unchanged." });
+  }
   for (const adapter of deps.adapters) {
     const scopes: Scope[] = adapter.supportedScopes.length > 0 ? [...adapter.supportedScopes] : ["project", "global"];
     for (const scope of scopes) {
@@ -223,7 +231,8 @@ export async function runDoctor(deps: DoctorDependencies): Promise<DoctorReport>
     detail: deps.skillInstaller.id === "unavailable" ? "unavailable (generic installer deferred)" : `available (${deps.skillInstaller.id})`,
   });
 
-  const ok = tools.every((check) => check.status !== "fail") && versions.ok && hosts.every((check) => check.status !== "fail") && skill.every((check) => check.status !== "fail");
+  const probe = deps.probe ? await probeMcp(launch, context.cwd, context.env) : undefined;
+  const ok = (!probe || probe.status === "pass") && tools.every((check) => check.status !== "fail") && versions.ok && hosts.every((check) => check.status !== "fail") && skill.every((check) => check.status !== "fail");
   return {
     schema: "pi-task-exec.doctor.v1",
     generatedAt: deps.now().toISOString(),
@@ -240,6 +249,7 @@ export async function runDoctor(deps: DoctorDependencies): Promise<DoctorReport>
     tools,
     hosts,
     skill,
+    ...(probe ? { probe } : {}),
     ok,
   };
 }
@@ -261,6 +271,8 @@ export function formatDoctor(report: DoctorReport): string {
   section("Tools", report.tools);
   section("Host adapters", report.hosts);
   section("Skill targets", report.skill);
+  if (report.probe) lines.push(`Package MCP probe: [${report.probe.status}] ${report.probe.stage} (${report.probe.elapsedMs} ms): ${report.probe.detail}`);
+  else lines.push("Connection: not probed. Config checks do not prove Host tool availability.");
   lines.push(`Overall: ${report.ok ? "ok" : "attention required"}`);
   return lines.join("\n");
 }

@@ -3,7 +3,7 @@ import type { McpEntryPlanResult, McpPlanInput, McpRemovalPlanResult, McpUpdateP
 import { SERVER_ID } from "../identity.js";
 import type { HostContext, PlanConflict, PlanWarning, Scope } from "../plan/model.js";
 import { editJsonc, JsoncEditError, parseJsoncRoot, requireObjectContainer, type JsonRecord } from "./jsonc.js";
-import { BaseHostAdapter, absoluteEnvPath, classifyManagedEntry, deepEqual, pathForPlatform, type HostInspection, xdgConfigHome } from "./shared.js";
+import { BaseHostAdapter, absoluteEnvPath, classifyManagedEntry, retainManagedLaunchOptions, deepEqual, pathForPlatform, type HostInspection, xdgConfigHome } from "./shared.js";
 
 const CONTAINER = "context_servers";
 
@@ -83,7 +83,7 @@ export class ZedHostAdapter extends BaseHostAdapter {
     const parsed = this.entryFrom(input, path);
     if (!parsed.ok) return { kind: "conflict", conflict: parsed.conflict };
     const existing = parsed.existing;
-    const canonical = this.canonicalEntry(input.launch);
+    const canonical = this.canonicalEntry(existing ? retainManagedLaunchOptions(existing, input.launch, "command-args") : input.launch);
     if (existing) {
       if (!deepEqual(existing, canonical)) {
         return {
@@ -119,7 +119,7 @@ export class ZedHostAdapter extends BaseHostAdapter {
         ),
       };
     }
-    const canonical = this.canonicalEntry(input.launch);
+    const canonical = this.canonicalEntry(retainManagedLaunchOptions(existing, input.launch, "command-args"));
     if (deepEqual(existing, canonical)) return { kind: "no-op", path, current: managed.current, warnings };
     try {
       const content = editJsonc(input.currentContent ?? "", [CONTAINER, SERVER_ID], canonical);
@@ -137,7 +137,7 @@ export class ZedHostAdapter extends BaseHostAdapter {
     const parsed = this.entryFrom(input, path);
     if (!parsed.ok) return { kind: "conflict", conflict: parsed.conflict };
     if (!parsed.existing) return { kind: "ok", path, content: input.currentContent, changed: false, warnings };
-    if (!deepEqual(parsed.existing, this.canonicalEntry(input.launch))) {
+    if (!deepEqual(parsed.existing, this.canonicalEntry(retainManagedLaunchOptions(parsed.existing, input.launch, "command-args")))) {
       return {
         kind: "conflict",
         conflict: conflict(
@@ -166,7 +166,7 @@ export class ZedHostAdapter extends BaseHostAdapter {
       return { entryPresent: false, managed: false, parseError: error instanceof Error ? error.message : String(error), notes: [] };
     }
     if (!existing) return { entryPresent: false, managed: false, notes: [] };
-    const managed = deepEqual(existing, this.canonicalEntry(launch));
+    const managed = deepEqual(existing, this.canonicalEntry(retainManagedLaunchOptions(existing, launch, "command-args")));
     return { entryPresent: true, managed, notes: managed ? [] : [`Existing context_servers.${SERVER_ID} entry does not match the exact managed fingerprint.`] };
   }
 }

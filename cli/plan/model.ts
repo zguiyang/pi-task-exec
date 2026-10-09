@@ -1,9 +1,10 @@
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, statSync } from "node:fs";
+import { isAbsolute, join, win32 } from "node:path";
 import type { HostAdapter, HostId, HostTarget, McpLaunchSpec, McpPlanInput } from "../hosts/adapters.js";
 import type { SkillCliPlan, SkillInstaller } from "../installers/skill.js";
 import { PACKAGE_NAME, SKILL_NAME } from "../identity.js";
 import { sha256 } from "./safety.js";
+import { highlight } from "../presentation.js";
 
 export const PLAN_SCHEMA = "pi-task-exec.plan.v1";
 export const MANAGED_BY = "pi-task-exec";
@@ -156,8 +157,9 @@ export interface PlanDependencies {
 export type LaunchMode = "npm" | "checkout";
 
 /** Production npm install launch contract. */
-export function npmLaunchSpec(version: string): McpLaunchSpec {
-  return { command: "npx", args: ["-y", `${PACKAGE_NAME}@${version}`, "mcp", "serve"] };
+export function npmLaunchSpec(version: string, prefix?: string): McpLaunchSpec {
+  if (prefix !== undefined && !isAbsolute(prefix) && !win32.isAbsolute(prefix)) throw new Error("--npm-prefix must be an absolute directory");
+  return { command: "npx", args: [...(prefix ? ["--prefix", prefix] : []), "-y", `${PACKAGE_NAME}@${version}`, "mcp", "serve"] };
 }
 
 /** Source-checkout launch contract: an absolute local path, never an npm package. */
@@ -193,9 +195,18 @@ export function resolveLaunchSpec(input: {
   packageVersion: string;
   env: NodeJS.ProcessEnv;
   mode?: LaunchMode;
+  npmPrefix?: string;
+  requireReady?: boolean;
 }): { mode: LaunchMode; launch: McpLaunchSpec } {
   const mode = hasGitCheckout(input.packageRoot) ? "checkout" : (input.mode ?? detectLaunchMode(input.packageRoot, input.env));
-  return { mode, launch: mode === "checkout" ? checkoutLaunchSpec(input.packageRoot) : npmLaunchSpec(input.packageVersion) };
+  if (input.npmPrefix !== undefined) {
+    if (mode !== "npm") throw new Error("--npm-prefix applies to a published npm launch; use --local-dev for a source checkout");
+    if (!isAbsolute(input.npmPrefix) || !statSync(input.npmPrefix).isDirectory()) throw new Error("--npm-prefix must be an existing absolute directory");
+    if (existsSync(join(input.npmPrefix, "package.json")) || existsSync(join(input.npmPrefix, "node_modules"))) throw new Error("--npm-prefix must be independent of npm projects (no package.json or node_modules)");
+  }
+  const launch = mode === "checkout" ? checkoutLaunchSpec(input.packageRoot) : npmLaunchSpec(input.packageVersion, input.npmPrefix);
+  if (input.requireReady) launch.requireReady = true;
+  return { mode, launch };
 }
 
 /** @deprecated use {@link npmLaunchSpec}; retained for the stage 7 plan model. */
@@ -322,72 +333,39 @@ export function planJson(plan: InstallPlan): string {
   return JSON.stringify(serializePlan(plan), null, 2);
 }
 
-export function formatPlan(plan: InstallPlan): string {
-  const lines: string[] = [];
-  lines.push(`${plan.schema}`);
-  lines.push(`Operation: ${plan.operation}${plan.target === "both" ? " (mcp + skill)" : ` (${plan.target})`}`);
-  lines.push(`Host: ${plan.host ?? "n/a"}`);
-  lines.push(`Scope: ${plan.scope ?? "n/a"}`);
-  lines.push(`Dry run: ${plan.dryRun ? "yes" : "no"}`);
-  lines.push(`Launch mode: ${plan.launchMode}`);
-  if (plan.hostTarget) {
-    const target = plan.hostTarget;
-    lines.push(`Host target: ${target.host} (${target.displayName})`);
-    lines.push(`Platform: ${target.platform}`);
-    lines.push(`Config format: ${target.format}`);
-    lines.push(`Config key: ${target.key}`);
-    lines.push(`Config path: ${target.path}`);
-    lines.push(`Support: ${target.supported ? "supported" : `unsupported (${target.support?.code ?? "unknown"})`}`);
-    lines.push(`Restart required: ${target.requiresRestart ? "yes" : "no"}`);
-    lines.push(`Trust required: ${target.requiresTrust ? "yes" : "no"}${target.trustNote ? ` — ${target.trustNote}` : ""}`);
+export function formatPlan(plan: InstallPlan, color = false): string {
+  const action = { add: "Add", setup: "Install", update: "Update", remove: "Remove", doctor: "Check" }[plan.operation];
+  const component = plan.target === "both" ? "MCP + Skill" : plan.target === "mcp" ? "MCP" : "Skill";
+  const host = plan.hostTarget?.displayName ?? plan.host;
+  const lines = ["", highlight(`${action} ${component}${host ? ` · ${host}` : ""} · ${plan.scope ?? ""}`, "cyan", color)];
+  for (const item of plan.creates) lines.push(`  Create ${item.path}`);
+  for (const item of plan.updates) lines.push(`  Update ${item.path}`);
+  for (const item of plan.removals) lines.push(`  Remove ${item.path}`);
+  if (plan.skillCli) lines.push(`  ${plan.operation === "update" ? "Update" : "Install"} ${plan.skillCli.installDir}`);
+  if (plan.backups.length) lines.push("  Existing configuration will be backed up.");
+  for (const item of plan.updatePreview ?? []) {
+    const version = item.current || item.desired ? ` (current: ${item.current ?? "none"}; target: ${item.desired ?? "none"})` : "";
+    lines.push(`  ${item.target}: ${item.state}${version}`);
+    if (item.lossWarning) lines.push(highlight("  Skill update: existing local changes may be lost.", "yellow", color));
   }
-  lines.push(`Backup strategy: ${plan.backups.length > 0 ? (plan.backups[0]?.strategy ?? "none") : "none"}`);
-  if (plan.resolvedPaths.config) lines.push(`Config path: ${plan.resolvedPaths.config}`);
-  if (plan.resolvedPaths.skillDir) lines.push(`Skill path: ${plan.resolvedPaths.skillDir}`);
-  if (plan.skillCli) {
-    const cli = plan.skillCli;
-    lines.push(`Skill installer: ${cli.installer}@${cli.cliVersion}`);
-    lines.push(`Skill agent: ${cli.agent}`);
-    lines.push(`Skill source: ${cli.repository} (${cli.subpath})`);
-    lines.push(`Skill ref: ${cli.ref} (${cli.refKind})`);
-    if (cli.currentRef) lines.push(`Skill current ref: ${cli.currentRef}`);
-    lines.push(`Skill command: ${cli.command} ${cli.args.join(" ")}`);
-    lines.push(`Skill install path: ${cli.installDir}`);
-    lines.push(`Skill lock path: ${cli.lockFile}`);
-  }
-  if (plan.target !== "mcp" && plan.scope) {
-    lines.push(
-      `Skill scope: ${plan.scope}${
-        plan.scope === "global" ? " (shared .agents/skills across projects for this home)" : " (project-local .agents/skills)"
-      }`,
-    );
-  }
-  const section = (title: string, entries: string[]) => {
-    lines.push(`${title}:`);
-    if (entries.length === 0) lines.push("  (none)");
-    else for (const entry of entries) lines.push(`  - ${entry}`);
+  const section = (title: string, entries: string[], tone: "yellow" | "red") => {
+    if (!entries.length) return;
+    lines.push("", highlight(`${title}:`, tone, color));
+    for (const entry of entries) lines.push(`  ${entry}`);
   };
-  section("Creates", plan.creates.map((item) => `${item.path} — ${item.summary}`));
-  section("Updates", plan.updates.map((item) => `${item.path} — ${item.summary}`));
-  section("Removals", plan.removals.map((item) => `${item.path} — ${item.summary}`));
-  section("Backups", plan.backups.map((item) => `${item.path} -> ${item.backupPath} (${item.strategy}; ${item.reason})`));
-  if ((plan.updatePreview ?? []).length > 0) {
-    section(
-      "Update",
-      (plan.updatePreview ?? []).map((item) => {
-        const key = item.key ? ` [${item.key}]` : "";
-        const path = item.path ? ` ${item.path}` : "";
-        const current = item.current ? ` (current: ${item.current})` : "";
-        const desired = item.desired ? ` (target: ${item.desired})` : "";
-        const loss = item.lossWarning ? " — existing local changes may be lost" : "";
-        return `${item.target}: ${item.state}${key}${path}${current}${desired}${loss}`;
-      }),
-    );
-  }
-  section("Conflicts", plan.conflicts.map((item) => `${item.path} — ${item.message}`));
-  section("Skill safety", (plan.skillCli?.safety ?? []).map((item) => `${item.path} — ${item.message}`));
-  section("Unsupported", plan.unsupported.map((item) => `${item.target}${item.host ? `/${item.host}` : ""} — ${item.message}`));
-  section("Warnings", plan.warnings.map((item) => `${item.code} — ${item.message}`));
+  section("Cannot proceed", plan.conflicts.map((item) => `${item.path}\n  ${item.message}`), "red");
+  section("Requires approval", (plan.skillCli?.safety ?? []).map((item) => `${item.path} — ${item.message}`), "yellow");
+  section("Unsupported", plan.unsupported.map((item) => item.message), "red");
+  const routine = new Set(["already_configured", "already_up_to_date", "not_configured"]);
+  if (plan.operation === "remove") routine.add("project_trust_required");
+  const safetyMessages = new Set((plan.skillCli?.safety ?? []).map((item) => item.message));
+  const notes = plan.warnings.filter((item) => !routine.has(item.code) && !safetyMessages.has(item.message)).map((item) => {
+    if (item.code === "local_checkout_launch") return "Uses this local checkout; keep it available.";
+    if (item.code === "project_trust_required") return "Trust this project in Codex to enable its MCP.";
+    return item.message;
+  });
+  section("Note", [...new Set(notes)], "yellow");
+  lines.push("");
   return lines.join("\n");
 }
 
@@ -404,7 +382,7 @@ function plannedBackupPath(path: string): string {
 }
 
 function desiredLaunchLabel(deps: PlanDependencies): string {
-  return deps.launchMode === "checkout" ? (deps.launch.args[0] ?? deps.launch.command) : (deps.launch.args[1] ?? "");
+  return deps.launchMode === "checkout" ? (deps.launch.args[0] ?? deps.launch.command) : (deps.launch.args.find((arg) => arg.startsWith(`${PACKAGE_NAME}@`)) ?? "");
 }
 
 /**
@@ -463,7 +441,7 @@ function planMcpUpdate(
     }
     plan.warnings.push({
       code: "local_checkout_launch",
-      message: `This entry launches the local checkout at ${deps.launch.args[0] ?? deps.launch.command} with node, not a published npm package. The npm package is not published; re-run from an installed package before sharing this configuration.`,
+      message: `This entry runs local source code with node: ${deps.launch.args[0] ?? deps.launch.command}. It does not use the published npm package. Keep this checkout and its built files available; use an installed npm package to generate a portable configuration.`,
     });
   }
   for (const warning of result.warnings) plan.warnings.push(warning);
@@ -524,7 +502,7 @@ async function planMcp(plan: InstallPlan, request: PlanRequest, deps: PlanDepend
     }
     plan.warnings.push({
       code: "local_checkout_launch",
-      message: `This entry launches the local checkout at ${deps.launch.args[0] ?? deps.launch.command} with node, not a published npm package. The npm package is not published; re-run from an installed package before sharing this configuration.`,
+      message: `This entry runs local source code with node: ${deps.launch.args[0] ?? deps.launch.command}. It does not use the published npm package. Keep this checkout and its built files available; use an installed npm package to generate a portable configuration.`,
     });
   }
   const currentContent = (await adapter.readConfig(configPath)) ?? null;

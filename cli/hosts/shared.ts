@@ -94,7 +94,7 @@ export function deepEqual(left: unknown, right: unknown): boolean {
   return false;
 }
 
-export type ManagedEntryFormat = "command-args" | "opencode";
+export type ManagedEntryFormat = "command-args" | "opencode" | "codex";
 
 /** A provably managed launch found in a host config entry. */
 export interface ManagedLaunch {
@@ -125,8 +125,8 @@ function isManagedCheckoutLaunch(value: string): boolean {
  */
 export function classifyManagedEntry(entry: Record<string, unknown>, format: ManagedEntryFormat): ManagedLaunch | null {
   let full: unknown[];
-  if (format === "command-args") {
-    const keys = Object.keys(entry).sort();
+  if (format === "command-args" || format === "codex") {
+    const keys = Object.keys(entry).filter((key) => !(format === "codex" && key === "required" && entry.required === true)).sort();
     if (keys.length !== 2 || keys[0] !== "args" || keys[1] !== "command") return null;
     if (typeof entry.command !== "string" || !Array.isArray(entry.args)) return null;
     full = [entry.command, ...entry.args];
@@ -136,6 +136,9 @@ export function classifyManagedEntry(entry: Record<string, unknown>, format: Man
     if (entry.type !== "local" || !Array.isArray(entry.command)) return null;
     full = [...entry.command];
   }
+  // Isolated npm launches remain recognizable for safe update/removal.
+  if (full[0] === "npx" && full[1] === "--prefix" && typeof full[2] === "string" &&
+      (posix.isAbsolute(full[2]) || win32.isAbsolute(full[2]))) full = [full[0], ...full.slice(3)];
   if (
     full.length === 5 &&
     full[0] === "npx" &&
@@ -167,6 +170,17 @@ export interface HostInspection {
   parseError?: string;
   /** Extra human-readable notes for doctor output. */
   notes: string[];
+}
+
+/** Updates retain previously selected runtime/readiness settings. */
+export function retainManagedLaunchOptions(entry: Record<string, unknown>, launch: McpLaunchSpec, format: ManagedEntryFormat): McpLaunchSpec {
+  const previous = format === "opencode" ? entry.command : entry.args;
+  const args = [...launch.args];
+  const offset = format === "opencode" ? 1 : 0;
+  if (launch.command === "npx" && !args.includes("--prefix") && Array.isArray(previous) && previous[offset] === "--prefix" && typeof previous[offset + 1] === "string") {
+    args.unshift("--prefix", previous[offset + 1]);
+  }
+  return { ...launch, args, ...(format === "codex" && entry.required === true ? { requireReady: true } : {}) };
 }
 
 export abstract class BaseHostAdapter implements HostAdapter {

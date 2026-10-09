@@ -17,6 +17,8 @@ export type ConfigFormat = "toml" | "jsonc";
 export interface McpLaunchSpec {
   command: string;
   args: string[];
+  /** Host-native readiness request; only supported adapters may serialize it. */
+  requireReady?: boolean;
 }
 
 export interface McpPlanInput {

@@ -257,7 +257,7 @@ test("MCP old-version update rewrites only the pinned npm token and preserves un
   const merged = await readFile(path, "utf8");
   assert.match(merged, /# keep comment/);
   assert.match(merged, /\[history\]/);
-  assert.match(merged, /@0\.1\.0/);
+  assert.match(merged, /@0\.2\.0/);
   assert.doesNotMatch(merged, /@0\.0\.9/);
 });
 
@@ -558,7 +558,7 @@ test("combined update reports success when both installed components update", as
   assert.equal(execution.status, "success");
   assert.equal(spawnCalls.length, 1);
   assert.deepEqual(preflightCalls, [targetRef]);
-  assert.match(await readFile(join(root, "project", ".codex", "config.toml"), "utf8"), /@0\.1\.0/);
+  assert.match(await readFile(join(root, "project", ".codex", "config.toml"), "utf8"), /@0\.2\.0/);
 });
 
 test("combined update asks the replacement confirmation once before the MCP write", async () => {
@@ -578,7 +578,7 @@ test("combined update asks the replacement confirmation once before the MCP writ
   assert.equal(confirmCalls.length, 1, "the safety prompt is asked once, not duplicated after the MCP write");
   assert.equal(confirmCalls[0].safety, "skill-path-safety");
   assert.equal(calls.length, 1);
-  assert.match(await readFile(join(root, "project", ".codex", "config.toml"), "utf8"), /@0\.1\.0/);
+  assert.match(await readFile(join(root, "project", ".codex", "config.toml"), "utf8"), /@0\.2\.0/);
   const [plan] = jsonBlocks(captured.stdout());
   assert.equal(plan.operation, "update");
 });
@@ -590,7 +590,7 @@ test("combined update preserves MCP success when the skill install fails (partia
   assert.equal(execution.status, "partial");
   assert.deepEqual(execution.parts.map((part) => [part.target, part.status]), [["mcp", "success"], ["skill", "failed"]]);
   assert.equal(spawnCalls.length, 1);
-  assert.match(await readFile(join(root, "project", ".codex", "config.toml"), "utf8"), /@0\.1\.0/);
+  assert.match(await readFile(join(root, "project", ".codex", "config.toml"), "utf8"), /@0\.2\.0/);
 });
 
 test("combined update preserves skill success when the MCP write fails (partial B)", async () => {
@@ -781,7 +781,7 @@ test("a missing or unverifiable release tag conflicts the complete update before
   assert.deepEqual(action, { kind: "exit", code: 1 });
   const [plan, execution] = jsonBlocks(captured.stdout());
   assert.equal(plan.conflicts[0].code, "release_tag_missing");
-  assert.match(plan.conflicts[0].message, /missing v0\.1\.0/);
+  assert.match(plan.conflicts[0].message, /missing v0\.2\.0/);
   assert.equal(execution.status, "conflict");
   assert.equal(calls.length, 0, "no Skills CLI spawn after a failed tag preflight");
   assert.equal(await readFile(configPath, "utf8"), beforeConfig);
@@ -802,7 +802,7 @@ test("a missing release tag does not block an MCP-only update (Skill absent)", a
   assert.equal(plan.conflicts.length, 0, "an unrelated GitHub tag must not block an MCP-only update");
   assert.deepEqual(preflightCalls, [], "no Skill update means no release tag preflight");
   assert.equal(execution.status, "success");
-  assert.match(await readFile(configPath, "utf8"), /@0\.1\.0/);
+  assert.match(await readFile(configPath, "utf8"), /@0\.2\.0/);
 });
 
 // ---------------------------------------------------------------------------
@@ -837,12 +837,12 @@ test("the text preview shows current/target refs, managed key/path, scope impact
   const text = captured.stdout();
   assert.match(text, /Pi TaskExec Update/);
   assert.match(text, /current: @zguiyang\/pi-task-exec@0\.0\.9/);
-  assert.match(text, /target: @zguiyang\/pi-task-exec@0\.1\.0/);
-  assert.match(text, /mcp_servers\.pi-task-exec/);
+  assert.match(text, /target: @zguiyang\/pi-task-exec@0\.2\.0/);
+  assert.match(text, /Update .*config\.toml/);
   assert.match(text, /current: v0\.0\.9/);
-  assert.match(text, /target: v0\.1\.0/);
+  assert.match(text, /target: v0\.2\.0/);
   assert.match(text, /existing local changes may be lost/);
-  assert.match(text, /Skill scope: project/);
+  assert.match(text, /Update MCP \+ Skill · Codex · project/);
 });
 
 test("global skill preview describes the shared .agents/skills scope", async () => {
@@ -852,7 +852,8 @@ test("global skill preview describes the shared .agents/skills scope", async () 
   const { deps, captured } = makeDeps(root, { packageRoot: pkg, interaction: scriptedInteraction() });
   const action = await runCli(["update", "--host", "codex", "--scope", "global", "--dry-run"], deps);
   assert.deepEqual(action, { kind: "exit", code: 0 });
-  assert.match(captured.stdout(), /Skill scope: global \(shared \.agents\/skills/);
+  assert.match(captured.stdout(), /Update MCP \+ Skill · Codex · global/);
+  assert.match(captured.stdout(), /\.agents[\/\\]skills/);
 });
 
 test("refusing the plan confirmation leaves MCP and skill untouched", async () => {
@@ -867,7 +868,7 @@ test("refusing the plan confirmation leaves MCP and skill untouched", async () =
   const { deps, captured } = makeDeps(root, { packageRoot: pkg, skillSpawn: spawn, interaction });
   const action = await runCli(["update", "--host", "codex", "--scope", "project"], deps);
   assert.deepEqual(action, { kind: "exit", code: 0 });
-  assert.match(captured.stdout(), /Cancelled: no changes were made\./);
+  assert.match(captured.stdout(), /Cancelled(?:\.|:) (?:No files changed|no changes were made)\./);
   assert.equal(calls.length, 0);
   assert.equal(await readFile(configPath, "utf8"), beforeConfig);
   assert.equal(await readFile(join(target.installDir, "SKILL.md"), "utf8"), beforeSkill);

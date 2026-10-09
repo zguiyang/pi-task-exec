@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { mkdir, realpath, stat } from "node:fs/promises";
 import { delimiter, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { PiRpcWorker } from "../rpc/pi-rpc.js";
@@ -29,8 +30,31 @@ export class WorkerManager {
   private readonly config = readConfig();
   private readonly maxWorkers = environmentNumber("PI_WORKER_MAX_WORKERS", 4);
   private readonly allowedRootsSetting = process.env.PI_WORKER_ALLOWED_ROOTS;
+  private clientRoots: string[] | undefined;
+  private rootsPending: Promise<void> = Promise.resolve();
+  private rootsRevision = 0;
   private shuttingDown = false;
   private spawning = 0;
+
+  /** Explicit user roots always win. A Roots failure must not widen access. */
+  refreshClientRoots(load: () => Promise<readonly string[]>): Promise<void> {
+    if (this.allowedRootsSetting !== undefined) return Promise.resolve();
+    const revision = ++this.rootsRevision;
+    this.clientRoots = [];
+    const pending = (async () => {
+      const uris = await load();
+      const roots = await Promise.all(uris.map(async (uri) => {
+        const url = new URL(uri);
+        if (url.protocol !== "file:" || url.search || url.hash) throw new Error("MCP Roots must be local file URLs");
+        const root = await realpath(fileURLToPath(url));
+        if (!(await stat(root)).isDirectory()) throw new Error("MCP Roots must be existing directories");
+        return root;
+      }));
+      if (revision === this.rootsRevision) this.clientRoots = roots;
+    })();
+    this.rootsPending = pending;
+    return pending;
+  }
 
   async spawn(input: { task: string; cwd: string; mode: WorkerMode; profile: WorkerProfile; taskTimeoutMs?: number | undefined; model?: string | undefined }) {
     if (this.shuttingDown) throw new Error("MCP server is shutting down and cannot start workers");
@@ -143,7 +167,8 @@ export class WorkerManager {
     if (!isAbsolute(rawPath)) throw new Error("cwd must be an absolute path");
     const target = await realpath(rawPath);
     if (!(await stat(target)).isDirectory()) throw new Error("cwd must be a directory");
-    const configured = this.allowedRootsSetting?.split(delimiter).filter(Boolean) ?? [process.cwd()];
+    if (this.allowedRootsSetting === undefined) await this.rootsPending;
+    const configured = this.allowedRootsSetting?.split(delimiter).filter(Boolean) ?? this.clientRoots ?? [process.cwd()];
     const roots = await Promise.all(configured.map((root) => realpath(resolve(root))));
     if (!roots.some((root) => this.isInside(root, target))) {
       throw new Error(`cwd is outside PI_WORKER_ALLOWED_ROOTS: ${target}. Choose a directory inside an allowed root or configure PI_WORKER_ALLOWED_ROOTS before spawning.`);

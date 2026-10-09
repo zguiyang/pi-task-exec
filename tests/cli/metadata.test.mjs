@@ -15,7 +15,7 @@ test("root package.json exposes only the pi-task-exec product identity", async (
   const pkg = await readJson(resolve(repoRoot, "package.json"));
   assert.equal(pkg.name, PACKAGE_NAME);
   assert.equal(pkg.name, "@zguiyang/pi-task-exec");
-  assert.equal(pkg.version, "0.1.0");
+  assert.equal(pkg.version, "0.2.0");
   assert.equal(pkg.version, VERSION);
   assert.equal(pkg.mcpName, "io.github.zguiyang/pi-task-exec");
   assert.deepEqual(pkg.bin, { [PRODUCT_NAME]: "./bin/pi-task-exec.mjs" });
@@ -29,7 +29,7 @@ test("server.json matches the new identity and positional mcp serve launch contr
   const server = await readJson(resolve(repoRoot, "server.json"));
   assert.equal(server.name, "io.github.zguiyang/pi-task-exec");
   assert.equal(server.title, "Pi TaskExec");
-  assert.equal(server.version, "0.1.0");
+  assert.equal(server.version, "0.2.0");
   assert.equal(server.websiteUrl, "https://github.com/zguiyang/pi-task-exec");
   assert.deepEqual(server.repository, {
     url: "https://github.com/zguiyang/pi-task-exec",
@@ -49,10 +49,10 @@ test("server.json matches the new identity and positional mcp serve launch contr
   assert.doesNotMatch(JSON.stringify(server), /pi-worker-mcp|pi_worker|pi-worker/);
 });
 
-test("package and registry versions stay in lockstep at 0.1.0", async () => {
+test("package and registry versions stay in lockstep at 0.2.0", async () => {
   const pkg = await readJson(resolve(repoRoot, "package.json"));
   const server = await readJson(resolve(repoRoot, "server.json"));
-  assert.equal(pkg.version, "0.1.0");
+  assert.equal(pkg.version, "0.2.0");
   assert.equal(pkg.version, server.version);
   assert.equal(server.packages[0].version, server.version);
   assert.equal(pkg.mcpName, server.name);

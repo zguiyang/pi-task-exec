@@ -1,6 +1,6 @@
 {
   "name": "@zguiyang/pi-task-exec",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "mcpName": "io.github.zguiyang/pi-task-exec",
   "description": "A host-agnostic MCP worker runtime for supervising local Pi coding-agent processes.",
   "license": "MIT",
@@ -27,6 +27,8 @@
     "start": "node bin/pi-task-exec.mjs mcp serve"
   },
   "dependencies": {
+    "@clack/prompts": "1.8.1",
+    "@modelcontextprotocol/client": "2.3.1",
     "@modelcontextprotocol/server": "^2.0.0",
     "jsonc-parser": "^3.3.1",
     "smol-toml": "^1.9.0",

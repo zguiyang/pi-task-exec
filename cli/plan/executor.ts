@@ -1,6 +1,7 @@
 import type { HostAdapter } from "../hosts/adapters.js";
 import { dirname } from "node:path";
 import type { CliIo } from "../io.js";
+import { highlight } from "../presentation.js";
 import { MANAGED_BY, type InstallPlan, type PlannedRemoval, type PlannedWrite } from "./model.js";
 import {
   SafetyError,
@@ -729,21 +730,23 @@ export function serializeExecution(result: ExecutionResult): Record<string, unkn
   };
 }
 
-export function formatExecution(result: ExecutionResult): string {
-  const lines: string[] = [`Execution: ${result.status}`];
-  const section = (title: string, entries: string[]) => {
-    lines.push(`${title}:`);
-    if (entries.length === 0) lines.push("  (none)");
-    else for (const entry of entries) lines.push(`  - ${entry}`);
-  };
-  section("Performed", result.performed);
-  section("Removed", result.removed);
-  section("Backups", result.backups.map((item) => `${item.path} -> ${item.backupPath ?? "(created file, no backup)"}`));
-  section("Errors", result.errors.map((error) => `${error.code}: ${error.message}`));
-  section("Warnings", result.warnings);
-  if (result.parts.length > 1) {
-    section("Parts", result.parts.map((part) => `${part.target}: ${part.status}`));
+export function formatExecution(result: ExecutionResult, color = false): string {
+  if (result.status === "dry-run") return highlight("Preview complete. No files changed.", "cyan", color);
+  if (result.status === "cancelled") return "Cancelled. No files changed.";
+  const failed = result.errors.length > 0;
+  const status = result.status === "success" ? "Done." : result.status === "no-op" ? "No changes needed." : result.status === "partial" ? "Partially completed." : "Could not complete.";
+  const lines = [highlight(status, failed ? "red" : result.status === "partial" ? "yellow" : "green", color)];
+  if (failed || result.status === "partial") {
+    for (const part of result.parts) lines.push(`  ${part.target}: ${part.status}`);
+    for (const path of result.performed) lines.push(`  Saved ${path}`);
+    for (const path of result.removed) lines.push(`  Removed ${path}`);
+    for (const backup of result.backups) if (backup.backupPath) lines.push(`  Backup: ${backup.backupPath}`);
   }
-  lines.push(`Rollback: ${result.rollback}`);
+  for (const error of result.errors) lines.push(highlight(`  Error (${error.code}): ${error.message}`, "red", color));
+  for (const warning of result.warnings) {
+    if (!failed && result.status !== "partial" && warning === "The Skills CLI install is not transactional; no rollback is performed.") continue;
+    lines.push(highlight(`  ${warning}`, "yellow", color));
+  }
+  if (result.rollback !== "none") lines.push(`  Rollback: ${result.rollback}`);
   return lines.join("\n");
 }

@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { PassThrough } from "node:stream";
+import { PassThrough, Writable } from "node:stream";
 import { afterEach, default as test } from "node:test";
 import { VERSION } from "../../dist/cli/identity.js";
 import { runCli } from "../../dist/cli/commands/index.js";
@@ -135,7 +135,7 @@ async function chooseWithArrowKey(choices, defaultValue, keypresses, confirm = f
   const outputChunks = [];
   const interaction = createArrowInteraction({
     input,
-    output: { write: (chunk) => { outputChunks.push(String(chunk)); return true; } },
+    output: new Writable({ write(chunk, _encoding, callback) { outputChunks.push(String(chunk)); callback(); } }),
   });
   const selection = confirm
     ? interaction.confirm("Continue?", defaultValue)
@@ -227,7 +227,42 @@ test("add mcp prompts for Agent and Scope and installs only the MCP entry", asyn
   assert.deepEqual(interaction.calls[1].values, ["project", "global"]);
   assert.ok(await exists(join(root, "project", ".codex", "config.toml")));
   assert.equal(await exists(join(root, "project", ".agents", "skills", "pi-delegate")), false);
-  assert.match(captured.stdout(), /Execution: success/);
+  assert.match(captured.stdout(), /Done\./);
+});
+
+test("interactive MCP removal selects targets and confirms before changing only its entry", async () => {
+  for (const approval of [false, true]) {
+    const root = await makeRoot();
+    const config = join(root, "project", "opencode.json");
+    await mkdir(dirname(config), { recursive: true });
+    await writeFile(config, JSON.stringify({ theme: "keep" }));
+    const initial = makeDeps(root);
+    await runCli(["add", "mcp", "--host", "opencode", "--scope", "project", "--local-dev", "--yes"], initial.deps);
+    const before = await readFile(config, "utf8");
+    const interaction = scriptedInteraction({ selects: ["opencode", "project"], confirms: [approval] });
+    const { deps, captured } = makeDeps(root, { interaction });
+    const action = await runCli(["remove", "mcp"], deps);
+    assert.equal(action.code, 0);
+    assert.deepEqual(interaction.calls.map(call => call.type), ["select", "select", "confirm"]);
+    assert.equal(interaction.calls[2].defaultValue, false);
+    assert.match(captured.stdout(), /Remove MCP · OpenCode · project/);
+    const after = await readFile(config, "utf8");
+    if (!approval) assert.equal(after, before);
+    else {
+      assert.equal(JSON.parse(after).theme, "keep");
+      assert.equal(JSON.parse(after).mcp?.["pi-task-exec"], undefined);
+    }
+  }
+});
+
+test("JSON MCP removal with missing targets never prompts", async () => {
+  const root = await makeRoot();
+  const interaction = scriptedInteraction();
+  const { deps, captured } = makeDeps(root, { interaction });
+  const action = await runCli(["remove", "mcp", "--json"], deps);
+  assert.equal(action.code, 1);
+  assert.equal(interaction.calls.length, 0);
+  assert.equal(jsonBlocks(captured.stdout())[0].error.code, "missing_host");
 });
 
 test("add skill prompts for Agent and Scope and installs only the Skill", async () => {
@@ -259,10 +294,9 @@ test("setup no-target prompts only for Agent and Scope, then confirms", async ()
   assert.ok(await exists(join(root, "project", ".codex", "config.toml")));
   assert.ok(await exists(join(target.installDir, "SKILL.md")));
   assert.equal(calls.length, 1);
-  assert.match(captured.stdout(), /Execution: success/);
-  assert.match(captured.stdout(), /Parts:/);
-  assert.match(captured.stdout(), /mcp: success/);
-  assert.match(captured.stdout(), /skill: success/);
+  assert.match(captured.stdout(), /Done\./);
+  assert.doesNotMatch(captured.stdout(), /Parts:|Execution:/);
+  assert.doesNotMatch(captured.stdout(), /mcp: success|skill: success/);
 });
 
 test("cancelling a prompt exits 0 with no side effects", async () => {
@@ -273,7 +307,7 @@ test("cancelling a prompt exits 0 with no side effects", async () => {
   const { deps, captured } = makeDeps(root, { interaction, skillSpawn: spawn });
   const action = await runCli(["setup", "--local-dev"], deps);
   assert.deepEqual(action, { kind: "exit", code: 0 });
-  assert.match(captured.stdout(), /Cancelled: no changes were made\./);
+  assert.match(captured.stdout(), /Cancelled(?:\.|:) (?:No files changed|no changes were made)\./);
   assert.equal(calls.length, 0);
   assert.equal(await exists(join(root, "project", ".codex", "config.toml")), false);
   assert.equal(await exists(target.installDir), false);
@@ -287,7 +321,7 @@ test("answering No to the plan confirmation exits 0 with no side effects", async
   const { deps, captured } = makeDeps(root, { interaction, skillSpawn: spawn });
   const action = await runCli(["setup", "--local-dev", "--host", "codex", "--scope", "project"], deps);
   assert.deepEqual(action, { kind: "exit", code: 0 });
-  assert.match(captured.stdout(), /Cancelled: no changes were made\./);
+  assert.match(captured.stdout(), /Cancelled(?:\.|:) (?:No files changed|no changes were made)\./);
   assert.equal(calls.length, 0);
   assert.equal(await exists(join(root, "project", ".codex", "config.toml")), false);
   assert.equal(await exists(target.installDir), false);
@@ -304,7 +338,7 @@ test("pre-supplied --host/--scope skip the Agent/Scope prompts", async () => {
   assert.deepEqual(interaction.calls.map((call) => call.type), ["confirm"]);
   assert.ok(await exists(join(root, "project", ".codex", "config.toml")));
   assert.ok(await exists(join(target.installDir, "SKILL.md")));
-  assert.match(captured.stdout(), /Parts:/);
+  assert.doesNotMatch(captured.stdout(), /Parts:|Execution:/);
 });
 
 // ---------------------------------------------------------------------------
@@ -421,4 +455,45 @@ test("the executor treats an empty plan as a no-op", async () => {
   const result = await executePlan(plan, { roots: [root], adapters: [], io: { stdout() {}, stderr() {} }, yes: true });
   assert.equal(result.status, "no-op");
   assert.deepEqual(result.parts, []);
+});
+
+test("prompt stream failures restore raw mode and become a nonzero CLI error", async () => {
+  const input = new PassThrough();
+  const rawStates = [];
+  input.isRaw = true;
+  input.setRawMode = (value) => { input.isRaw = value; rawStates.push(value); };
+  const output = new Writable({ write(_chunk, _encoding, callback) { callback(); } });
+  const interaction = createArrowInteraction({ input, output });
+  const { deps, captured } = makeDeps(await makeRoot(), { interaction });
+  const action = runCli(["setup"], deps);
+  setImmediate(() => input.emit("error", new Error("terminal disconnected")));
+  assert.equal((await action).code, 1);
+  assert.equal(input.isRaw, true);
+  assert.match(captured.stderr(), /Interactive prompt failed: terminal disconnected/);
+  assert.equal(input.listenerCount("keypress"), 0);
+  assert.equal(input.listenerCount("error"), 0);
+  input.destroy();
+  output.destroy();
+});
+
+test("JSON with explicit selections never invokes terminal prompts without --yes", async () => {
+  const interaction = scriptedInteraction({ confirms: [true] });
+  const { deps, captured } = makeDeps(await makeRoot(), { interaction });
+  const action = await runCli(["add", "mcp", "--host", "codex", "--scope", "project", "--local-dev", "--json"], deps);
+  assert.equal(action.code, 1);
+  assert.equal(interaction.calls.length, 0);
+  assert.equal(jsonBlocks(captured.stdout()).at(-1).status, "cancelled");
+  assert.doesNotMatch(captured.stdout(), /Cancelled: no changes/);
+});
+
+test("zero-width terminals fail before entering raw mode", async () => {
+  const input = new PassThrough();
+  let rawCalls = 0;
+  input.setRawMode = () => { rawCalls++; };
+  const output = new Writable({ write(_chunk, _encoding, callback) { callback(); } });
+  output.isTTY = true;
+  output.columns = 0;
+  await assert.rejects(createArrowInteraction({ input, output }).select("Choose", [{ value: "a", label: "A" }]), /nonzero width/);
+  assert.equal(rawCalls, 0);
+  input.destroy(); output.destroy();
 });

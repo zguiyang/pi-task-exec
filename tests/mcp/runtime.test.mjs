@@ -3,19 +3,19 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import readline from "node:readline";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const fakePi = fileURLToPath(new URL("./fixtures/fake-pi.mjs", import.meta.url));
 
-function startServer(mode) {
+function startServer(mode, options = {}) {
   const child = spawn(process.execPath, [resolve(root, "bin/pi-task-exec.mjs"), "mcp", "serve"], {
     cwd: root,
     env: {
       ...process.env,
       PI_WORKER_COMMAND: fakePi,
-      PI_WORKER_ALLOWED_ROOTS: root,
+      ...(options.allowedRoots === null ? { PI_WORKER_ALLOWED_ROOTS: undefined } : { PI_WORKER_ALLOWED_ROOTS: options.allowedRoots ?? root }),
       PI_WORKER_RPC_TIMEOUT_MS: "100",
       PI_WORKER_IDLE_TIMEOUT_MS: "0",
       PI_WORKER_TASK_TIMEOUT_MS: "2000",
@@ -30,6 +30,10 @@ function startServer(mode) {
   lines.on("line", (line) => {
     try {
       const message = JSON.parse(line);
+      if (message.method === "roots/list") {
+        child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { roots: options.roots().map(uri => ({ uri })) } })}\n`);
+        return;
+      }
       if (message.id !== undefined) {
         const resolveMessage = messages.get(message.id);
         if (resolveMessage) {
@@ -61,11 +65,11 @@ function startServer(mode) {
   return { child, request, notify };
 }
 
-async function initialize(server) {
+async function initialize(server, capabilities = {}) {
   const result = await server.request("initialize", {
     protocolVersion: "2025-03-26",
-    capabilities: {},
-    clientInfo: { name: "pi-task-exec-test", version: "0.1.0" },
+    capabilities,
+    clientInfo: { name: "pi-task-exec-test", version: "0.2.0" },
   });
   assert.equal(result.error, undefined);
   server.notify("notifications/initialized");
@@ -88,7 +92,7 @@ test("MCP discovery exposes delegation guidance, tool choice semantics, and type
   try {
     const initialized = await initialize(server);
     assert.equal(initialized.serverInfo.name, "pi-task-exec");
-    assert.equal(initialized.serverInfo.version, "0.1.0");
+    assert.equal(initialized.serverInfo.version, "0.2.0");
     assert.match(initialized.instructions, /subordinate coding workers/i);
     assert.match(initialized.instructions, /planning.*architecture.*delegation.*integration.*final review/i);
     assert.match(initialized.instructions, /never recursively delegate/i);
@@ -273,4 +277,36 @@ test("SIGTERM shutdown terminates an active worker process", async () => {
     if (server.child.exitCode === null) server.child.kill("SIGKILL");
   }
   assert.throws(() => process.kill(workerPid, 0), { code: "ESRCH" });
+});
+
+
+test("MCP negotiates Roots without blocking discovery or spawning Pi", async () => {
+  // Empty client roots must deny Worker starts even though server cwd exists.
+  const server = startServer("normal", { allowedRoots: null, roots: () => [] });
+  try {
+    await initialize(server, { roots: { listChanged: true } });
+    const catalog = await server.request("tools/list");
+    assert.equal(catalog.result.tools.length, 6);
+    const denied = await server.request("tools/call", { name: "pi_spawn", arguments: { task: "must be denied", cwd: root, mode: "direct", profile: "inspect" } });
+    assert.equal(denied.result.isError, true);
+    assert.match(denied.result.content[0].text, /outside PI_WORKER_ALLOWED_ROOTS/);
+    const listed = await server.request("tools/call", { name: "pi_list", arguments: {} });
+    assert.equal(JSON.parse(listed.result.content[0].text).length, 0);
+  } finally {
+    server.child.stdin.end();
+    await once(server.child, "close");
+  }
+});
+
+test("explicit Worker roots cannot be widened by Host Roots", async () => {
+  const server = startServer("normal", { allowedRoots: root, roots: () => [pathToFileURL("/").href] });
+  try {
+    await initialize(server, { roots: { listChanged: true } });
+    const denied = await server.request("tools/call", { name: "pi_spawn", arguments: { task: "must be denied", cwd: "/", mode: "direct", profile: "inspect" } });
+    assert.equal(denied.result.isError, true);
+    assert.match(denied.result.content[0].text, /outside PI_WORKER_ALLOWED_ROOTS/);
+  } finally {
+    server.child.stdin.end();
+    await once(server.child, "close");
+  }
 });
