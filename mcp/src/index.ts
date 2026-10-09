@@ -1,11 +1,47 @@
 #!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
+import { createInterface } from "node:readline/promises";
+import { homedir } from "node:os";
+import { fileURLToPath } from "node:url";
 import * as z from "zod/v4";
-import { PRODUCT_NAME, VERSION, runCli } from "./cli.js";
+import { createDefaultAdapters } from "./adapters.js";
+import { PRODUCT_NAME, VERSION, runCli, type CliDeps } from "./cli.js";
+import { spawnProcess } from "./doctor.js";
+import { defaultIo } from "./io.js";
+import { unavailableSkillInstaller } from "./skill.js";
 import { WorkerManager } from "./worker-manager.js";
 
-const cliAction = runCli(process.argv.slice(2));
+async function confirmPlan(): Promise<boolean> {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) return false;
+  const readline = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = await readline.question("Proceed with the plan above? [y/N] ");
+    return /^y(es)?$/i.test(answer.trim());
+  } finally {
+    readline.close();
+  }
+}
+
+const home = homedir();
+const cwd = process.cwd();
+const cliDeps: CliDeps = {
+  io: defaultIo,
+  env: process.env,
+  cwd,
+  home,
+  platform: process.platform,
+  packageRoot: fileURLToPath(new URL("../..", import.meta.url)),
+  packageVersion: VERSION,
+  adapters: createDefaultAdapters(),
+  skillInstaller: unavailableSkillInstaller(),
+  now: () => new Date(),
+  spawn: spawnProcess,
+  confirm: confirmPlan,
+  roots: [home, cwd],
+};
+
+const cliAction = await runCli(process.argv.slice(2), cliDeps);
 if (cliAction.kind === "exit") {
   process.exitCode = cliAction.code;
 } else {

@@ -12,50 +12,64 @@ status/result → Supervisor review and acceptance. `inspect`/`implement` are
 tool capability profiles and `direct`/`worktree` are working-directory modes;
 neither is an operating-system security sandbox.
 
-> Status: Phase 6 (old CLI and old product-identifier cleanup) plus the
-> authorized CLI routing work have been implemented in this checkout at version
-> `0.1.1`. The changes await Supervisor review; the dry-run package manifest was
-> verified, but nothing has been published. `mcp/dist/` is generated build
-> output from `mcp/src/`.
+> Status: Phase 6 (old CLI and old product-identifier cleanup) and the stage 7
+> unified CLI framework have been implemented in this checkout at version
+> `0.1.1`. Real host path/config adaptation (stage 8) and the generic skill
+> installer (stage 9) remain deferred. The changes await Supervisor review;
+> nothing has been published. `mcp/dist/` is generated build output from
+> `mcp/src/`.
 
 ## CLI surface
-
-The only real CLI behaviors in this build are:
-
-| Command | Behavior |
-| --- | --- |
-| `pi-task-exec` (no arguments) | Prints help and exits `0` without starting MCP. |
-| `pi-task-exec --help` | Prints help and exits `0`. |
-| `pi-task-exec --version` | Prints `0.1.1` and exits `0`. |
-| `pi-task-exec mcp serve` | Starts the existing MCP stdio runtime. |
 
 `mcp serve` is the single service-start contract used by Host configuration and
 the MCP Registry entry. All six MCP tools (`pi_spawn`, `pi_status`,
 `pi_steer`, `pi_continue`, `pi_abort`, `pi_list`) are preserved.
 
-The following commands are authorized for a later stage. They print a clear
-future-stage notice, change no files, and exit `1`; they never fall back to the
-previous CLI behavior:
+| Command | Behavior |
+| --- | --- |
+| `pi-task-exec` (no arguments) | Prints help and exits `0`; never starts MCP. |
+| `pi-task-exec --help` | Prints help and exits `0`. |
+| `pi-task-exec --version` | Prints only `0.1.1` and exits `0`. |
+| `pi-task-exec mcp serve` | Starts the existing MCP stdio runtime. |
+| `pi-task-exec doctor [--json]` | Read-only environment, host, skill, and version-contract check. |
+| `pi-task-exec add mcp --host <codex\|zed\|opencode> --scope <project\|global> [--dry-run] [--json] [--yes]` | Plans the host MCP entry. |
+| `pi-task-exec remove mcp --host <...> --scope <...>` | Plans removal of the host MCP entry. |
+| `pi-task-exec add skill --scope <project\|global>` | Plans the bundled skill through the installer seam. |
+| `pi-task-exec remove skill --scope <project\|global>` | Plans skill removal through the installer seam. |
+| `pi-task-exec setup --target <mcp\|skill\|both> [--host <...>] --scope <...>` | Plans combined setup. |
 
-- `pi-task-exec add mcp`
-- `pi-task-exec add skill`
-- `pi-task-exec setup`
-- `pi-task-exec doctor`
-- `pi-task-exec remove mcp`
-- `pi-task-exec remove skill`
+The CLI is a pure parser/router over a shared, stable plan model plus a
+separately testable plan executor. Every write command first prints a plan with
+full absolute paths, creates/updates/removals, conflicts, backups, warnings,
+and unsupported capabilities, then revalidates the plan immediately before
+executing. `--dry-run` prints the plan and exits without writing; `--json`
+emits stable, secret-free JSON; `--yes` may skip confirmation only after the
+plan is printed. Any conflict blocks the whole operation, and `--host` and
+`--scope` are mandatory for MCP add/remove/setup.
 
-Any other input, including the removed top-level `serve`, `version`, `update`,
-and `uninstall` routes, reports `Unknown command` plus help and exits `1`.
+Stage 7 defers real MCP path/config adaptation to stage 8 and the generic
+`.agents/skills` installer to stage 9. The registered Codex, Zed, and OpenCode
+adapters therefore mark real MCP installation/removal as unsupported instead of
+guessing a path or writing unknown config, and skill operations report
+pending/unavailable. No host config or skill file is written by `add`, `remove`,
+or `setup` in this checkout.
+
+Any unrecognized input, including the removed top-level `serve`, `version`,
+`update`, and `uninstall` routes and the unsupported `--all-hosts` flag,
+reports an error and exits `1`.
 
 ## Current status and non-claims
 
-Phase 6 is implemented in this checkout and awaits Supervisor review. The
-following are **not** implemented and are **not** claimed:
+Phase 6 and the stage 7 CLI framework are implemented in this checkout and
+await Supervisor review. The following are **not** implemented and are **not**
+claimed:
 
 - no npm packaging or publication, and no MCP Registry record;
-- no host or skill installer; `add`, `setup`, `doctor`, and `remove` only print
-  future-stage notices;
-- no cross-platform host support or verified installation paths;
+- no real host MCP install/remove and no verified cross-platform host paths or
+  config formats (stage 8);
+- no generic `.agents/skills` installer (stage 9); skill operations report
+  pending/unavailable;
+- `doctor` is read-only and does not prove that a host configuration works;
 - no release or version compatibility promise.
 
 ## Product identity
@@ -132,17 +146,17 @@ initialized fresh in this checkout.
 
 ## Installation
 
-There is no published package and no supported installation route yet. Until a
-host installer command is implemented, register the MCP with a stdio client
-using the launch contract:
+There is no published package and no supported installation route yet. The
+`add`/`remove`/`setup` commands currently generate and print plans only; real
+host installation is deferred. To register the MCP manually with a stdio
+client, use the launch contract:
 
 ```text
 command: npx
 args:    -y @zguiyang/pi-task-exec@0.1.1 mcp serve
 ```
 
-`setup`, `doctor`, `add`, and `remove` are not implemented; do not rely on any
-command described in planning documents.
+`doctor` is a read-only check and does not modify any host configuration.
 
 ## Development from source
 

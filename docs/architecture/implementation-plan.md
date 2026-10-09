@@ -1,6 +1,6 @@
 # Pi TaskExec 实施计划
 
-状态：阶段 1–5 已完成；阶段 6 的旧 CLI 退役、新入口路由及产品标识更新已在 2026-10-09 用户授权下实施，等待 Supervisor 审查；npm 与 MCP Registry 均未发布。后续安装器与发布阶段仍须按各自门槛执行。
+状态：阶段 1–5 已完成；阶段 6 的旧 CLI 退役、新入口路由及产品标识更新，以及阶段 7 的统一 CLI 框架（纯解析器/路由、共享计划模型、可独立测试的执行器、Host 适配器接口与安全原语）已在 2026-10-09 用户授权下实施，等待 Supervisor 审查；阶段 8 的真实 Host 路径/格式适配与阶段 9 的通用 Skill 安装器仍显式延后；npm 与 MCP Registry 均未发布。后续安装器与发布阶段仍须按各自门槛执行。
 日期：2026-10-08
 
 本计划按依赖顺序执行。任何阶段均不得越过公开发布门槛；Registry ID 冲突时停止，不回退旧名称。阶段 3–6 已按各自授权完成或正在审查；后续阶段仍须单独遵守其授权和发布门槛。
@@ -77,6 +77,7 @@
 - **回滚方式**：移除新 CLI 改动，保留 MCP Worker 运行时代码。
 - **公开发布影响**：无。
 - **人工决策**：是否纳入 remove 命令及非交互式默认行为。
+- **执行状态（2026-10-09）**：已实现纯解析器/路由 + 共享计划模型（operation/target/host/scope/resolved paths/creates/updates/removals/conflicts/backups/warnings/unsupported/dryRun，JSON 稳定且不包含配置密钥或文件内容）+ 可独立测试的计划执行器；Host 适配器接口（id/displayName/supportedPlatforms/supportedScopes/config 路径解析/读取/写入/条目规划/条目移除/doctor 检查）已注册 Codex、Zed、OpenCode，但阶段 8 前真实安装/移除一律标记为不支持，不沿用 `hosts.ts` 的 install/uninstall、不推测未验证路径、不写未知配置，接口可注入以便测试使用受支持的 fake adapter；Skill 通过类型化安装器 seam 报告 pending/unavailable，不写入。`add/remove mcp` 与包含 MCP 的 `setup` 强制显式 `--host`/`--scope`，`add/remove skill` 强制显式 `--scope`，`setup` 强制 `--target mcp|skill|both`；支持 `--help`/`--version`/`--dry-run`/`--yes`/`--json`，未知或畸形参数非零退出，无参数只显示帮助，`--version` 只输出包版本，未实现 `--all-hosts`。dry-run 与真实执行复用同一计划生成器，显示绝对路径，任何冲突阻止整体操作，执行前按 base hash 重新校验；`--yes` 仅在打印计划后跳过确认；doctor 只读并报告 Node/Pi/Git/包版本/平台/Host 适配器支持与配置检查/Skill 目标状态/版本契约，进程检查使用结构化 `spawn(command,args)` 且不打印密钥。已加入路径越界与符号链接边界、同目录临时文件 + 原子 rename、写入前备份、保留权限、失败回滚备份、安全创建、同内容幂等、拒绝不同用户内容、仅对显式受管且哈希未变的文件移除、受管内容漂移时不做自动回滚等安全原语及测试。`pi-task-exec mcp serve` 仍是唯一服务启动入口，六个 MCP 工具与 Worker 运行时未改动。
 
 ## 阶段 8：MCP 多平台安装适配
 

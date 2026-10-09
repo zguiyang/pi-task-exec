@@ -1,94 +1,353 @@
-export const VERSION = "0.1.1";
-export const PRODUCT_NAME = "pi-task-exec";
-export const PACKAGE_NAME = "@zguiyang/pi-task-exec";
+import type { HostAdapter } from "./adapters.js";
+import { KNOWN_HOST_IDS, isHostId } from "./adapters.js";
+import type { SpawnFunction } from "./doctor.js";
+import { formatDoctor, runDoctor } from "./doctor.js";
+import { PACKAGE_NAME, PRODUCT_NAME, VERSION } from "./identity.js";
+import { defaultIo, type CliIo } from "./io.js";
+import {
+  formatPlan,
+  generatePlan,
+  planJson,
+  type HostContext,
+  type PlanOperation,
+  type PlanTarget,
+  type Scope,
+} from "./plan.js";
+import type { SkillInstaller } from "./skill.js";
+import { executePlan, formatExecution, serializeExecution } from "./executor.js";
 
-/**
- * `serve` asks the entrypoint to start the MCP stdio runtime. Every other route
- * only prints a message and returns an explicit process exit code.
- */
+export { PACKAGE_NAME, PRODUCT_NAME, VERSION } from "./identity.js";
+export type { CliIo } from "./io.js";
+
+export interface CliOptions {
+  host?: string;
+  scope?: Scope;
+  target?: PlanTarget;
+  dryRun: boolean;
+  yes: boolean;
+  json: boolean;
+  help: boolean;
+  version: boolean;
+}
+
+export type ParsedCli =
+  | { kind: "help"; topic: string | null }
+  | { kind: "version" }
+  | { kind: "serve" }
+  | { kind: "command"; operation: PlanOperation; target: PlanTarget; options: CliOptions }
+  | { kind: "error"; code: string; message: string; json: boolean };
+
+export interface CliDeps {
+  io: CliIo;
+  env: NodeJS.ProcessEnv;
+  cwd: string;
+  home: string;
+  platform: NodeJS.Platform;
+  packageRoot: string;
+  packageVersion: string;
+  adapters: readonly HostAdapter[];
+  skillInstaller: SkillInstaller;
+  now: () => Date;
+  spawn: SpawnFunction;
+  confirm?: (plan: import("./plan.js").InstallPlan) => Promise<boolean>;
+  roots?: readonly string[];
+  backupDir?: string;
+}
+
 export type CliAction = { kind: "serve" } | { kind: "exit"; code: number };
 
-export interface CliIo {
-  stdout(text: string): void;
-  stderr(text: string): void;
-}
+const GLOBAL_HELP = `Usage:
+  ${PRODUCT_NAME} [command] [options]
 
-const defaultIo: CliIo = {
-  stdout: (text) => process.stdout.write(text),
-  stderr: (text) => process.stderr.write(text),
-};
+Commands:
+  ${PRODUCT_NAME} mcp serve          Start the MCP stdio runtime (the only server-start command)
+  ${PRODUCT_NAME} add mcp            Plan/install the MCP entry for an explicit host and scope
+  ${PRODUCT_NAME} add skill          Plan/install the pi-delegate skill for an explicit scope
+  ${PRODUCT_NAME} remove mcp         Plan/remove the MCP entry for an explicit host and scope
+  ${PRODUCT_NAME} remove skill       Plan/remove the pi-delegate skill for an explicit scope
+  ${PRODUCT_NAME} setup              Plan combined MCP and/or skill setup
+  ${PRODUCT_NAME} doctor             Read-only environment, host, skill, and version check
+
+Options:
+  --help                             Show help and exit
+  --version                          Print only the package version and exit
+  --dry-run                          Print the plan and exit without writing
+  --json                             Print stable machine-readable JSON
+  --yes                              Skip confirmation only after the plan is printed
+  --host <${KNOWN_HOST_IDS.join("|")}>
+  --scope <project|global>
+  --target <mcp|skill|both>          (setup only)
+
+Hosts: ${KNOWN_HOST_IDS.join(", ")}. Scopes: project, global.
+No arguments prints this help and never starts MCP.
+MCP stdio launch: npx -y ${PACKAGE_NAME}@${VERSION} mcp serve`;
+
+function commandHelp(topic: string): string {
+  switch (topic) {
+    case "mcp serve":
+      return `Usage:\n  ${PRODUCT_NAME} mcp serve\n\nStart the MCP stdio runtime. This is the only server-start command and the Registry launch contract.`;
+    case "add mcp":
+      return `Usage:\n  ${PRODUCT_NAME} add mcp --host <${KNOWN_HOST_IDS.join("|")}> --scope <project|global> [--dry-run] [--json] [--yes]\n\nPlan and (when verified) install the pi-task-exec MCP entry for an explicit host and scope. Stage 7 defers real path/config adaptation, so supported host/scope combinations report an unsupported reason and write nothing.`;
+    case "add skill":
+      return `Usage:\n  ${PRODUCT_NAME} add skill --scope <project|global> [--dry-run] [--json] [--yes]\n\nPlan and (when available) install the bundled pi-delegate skill. The generic installer is deferred, so this currently reports unavailable and writes nothing.`;
+    case "remove mcp":
+      return `Usage:\n  ${PRODUCT_NAME} remove mcp --host <${KNOWN_HOST_IDS.join("|")}> --scope <project|global> [--dry-run] [--json] [--yes]\n\nPlan and (when verified) remove the pi-task-exec MCP entry for an explicit host and scope.`;
+    case "remove skill":
+      return `Usage:\n  ${PRODUCT_NAME} remove skill --scope <project|global> [--dry-run] [--json] [--yes]\n\nPlan and (when available) remove the managed pi-delegate skill.`;
+    case "setup":
+      return `Usage:\n  ${PRODUCT_NAME} setup --target <mcp|skill|both> [--host <${KNOWN_HOST_IDS.join("|")}>] --scope <project|global> [--dry-run] [--json] [--yes]\n\nPlan combined setup. --host is required whenever --target includes mcp.`;
+    case "doctor":
+      return `Usage:\n  ${PRODUCT_NAME} doctor [--json]\n\nRead-only check of Node, Pi, Git, package/platform/version contract, host adapter capability, and skill target status. Never prints config secrets or file contents.`;
+    default:
+      return helpText();
+  }
+}
 
 export function helpText(): string {
-  return `${PRODUCT_NAME} ${VERSION}
-
-Usage:
-  ${PRODUCT_NAME}                 Show this help and exit
-  ${PRODUCT_NAME} --help          Show this help and exit
-  ${PRODUCT_NAME} --version       Print the version and exit
-  ${PRODUCT_NAME} mcp serve       Start the MCP stdio runtime
-
-Planned for a future stage (not implemented in this build):
-  ${PRODUCT_NAME} add mcp         Configure a host MCP entry
-  ${PRODUCT_NAME} add skill       Install the pi-delegate skill
-  ${PRODUCT_NAME} setup           Preview and configure the MCP and skill
-  ${PRODUCT_NAME} doctor          Check Node, Pi, Git, host config, and skill files
-  ${PRODUCT_NAME} remove mcp      Remove this host MCP entry
-  ${PRODUCT_NAME} remove skill    Remove the installed pi-delegate skill
-
-Hosts: codex, zed, opencode. Scopes: project, global.
-MCP stdio launch: npx -y ${PACKAGE_NAME}@${VERSION} mcp serve`;
+  return `${PRODUCT_NAME} ${VERSION}\n\n${GLOBAL_HELP}`;
 }
 
-function futureStageNotice(command: string): string {
-  return `${PRODUCT_NAME} ${command} is planned for a future stage and is not implemented in this build (${VERSION}). No host configuration or files were changed.`;
+function errorResult(code: string, message: string, json: boolean): ParsedCli {
+  return { kind: "error", code, message, json };
 }
 
-function unknownCommand(args: string[], io: CliIo): CliAction {
-  io.stderr(`Unknown command: ${args.join(" ")}\n\n`);
-  io.stderr(`${helpText()}\n`);
-  return { kind: "exit", code: 1 };
+function isScope(value: string): value is Scope {
+  return value === "project" || value === "global";
 }
 
-export function runCli(args: string[], io: CliIo = defaultIo): CliAction {
-  if (args.length === 0) {
-    io.stdout(`${helpText()}\n`);
-    return { kind: "exit", code: 0 };
-  }
+function isTarget(value: string): value is PlanTarget {
+  return value === "mcp" || value === "skill" || value === "both";
+}
 
-  const command = args[0];
-  if (command === "--help") {
-    io.stdout(`${helpText()}\n`);
-    return { kind: "exit", code: 0 };
-  }
-  if (command === "--version") {
-    io.stdout(`${VERSION}\n`);
-    return { kind: "exit", code: 0 };
-  }
+/** Pure argument parser. Unknown or malformed input always becomes an error. */
+export function parseCli(args: string[]): ParsedCli {
+  const options: CliOptions = { dryRun: false, yes: false, json: false, help: false, version: false };
+  const positionals: string[] = [];
+  let sawToken = false;
 
-  // The only real service-start route is `pi-task-exec mcp serve`.
-  if (command === "mcp") {
-    if (args.length === 3 && args[1] === "serve" && args[2] === "--help") {
-      io.stdout(`Usage:\n  ${PRODUCT_NAME} mcp serve\n\nStart the MCP stdio runtime.\n`);
-      return { kind: "exit", code: 0 };
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index] ?? "";
+    if (token === "--") {
+      positionals.push(...args.slice(index + 1));
+      break;
     }
-    if (args.length === 2 && args[1] === "serve") return { kind: "serve" };
-    return unknownCommand(args, io);
+    if (token.startsWith("--")) {
+      sawToken = true;
+      const equals = token.indexOf("=");
+      const name = equals >= 0 ? token.slice(0, equals) : token;
+      const inline = equals >= 0 ? token.slice(equals + 1) : undefined;
+      const takeValue = (): { value?: string; error?: ParsedCli } => {
+        if (inline !== undefined) {
+          if (inline === "") return { error: errorResult("missing_value", `${name} requires a value.`, options.json) };
+          return { value: inline };
+        }
+        const next = args[index + 1];
+        if (next === undefined) return { error: errorResult("missing_value", `${name} requires a value.`, options.json) };
+        index += 1;
+        return { value: next };
+      };
+      if (name === "--help") {
+        options.help = true;
+      } else if (name === "--version") {
+        options.version = true;
+      } else if (name === "--dry-run") {
+        options.dryRun = true;
+      } else if (name === "--yes") {
+        options.yes = true;
+      } else if (name === "--json") {
+        options.json = true;
+      } else if (name === "--host") {
+        const taken = takeValue();
+        if (taken.error) return taken.error;
+        if (!taken.value || !isHostId(taken.value)) return errorResult("invalid_value", `Unknown --host value: ${taken.value ?? ""}. Expected one of ${KNOWN_HOST_IDS.join(", ")}.`, options.json);
+        options.host = taken.value;
+      } else if (name === "--scope") {
+        const taken = takeValue();
+        if (taken.error) return taken.error;
+        if (!taken.value || !isScope(taken.value)) return errorResult("invalid_value", `Unknown --scope value: ${taken.value ?? ""}. Expected project or global.`, options.json);
+        options.scope = taken.value;
+      } else if (name === "--target") {
+        const taken = takeValue();
+        if (taken.error) return taken.error;
+        if (!taken.value || !isTarget(taken.value)) return errorResult("invalid_value", `Unknown --target value: ${taken.value ?? ""}. Expected mcp, skill, or both.`, options.json);
+        options.target = taken.value;
+      } else {
+        return errorResult("unknown_flag", `Unknown option: ${name}`, options.json);
+      }
+      continue;
+    }
+    if (token === "-h") {
+      options.help = true;
+      sawToken = true;
+      continue;
+    }
+    if (token === "-y") {
+      options.yes = true;
+      sawToken = true;
+      continue;
+    }
+    if (token.startsWith("-") && token.length > 1) {
+      return errorResult("unknown_flag", `Unknown option: ${token}`, options.json);
+    }
+    positionals.push(token);
+    sawToken = true;
   }
 
-  // These commands are authorized for a later stage. They must never fall back
-  // to the previous installer/uninstaller behavior or write any files.
-  if (command === "add" && (args[1] === "mcp" || args[1] === "skill")) {
-    io.stdout(`${futureStageNotice(`add ${args[1]}`)}\n`);
-    return { kind: "exit", code: 1 };
+  if (options.help) {
+    const topic = positionals.length > 0 ? positionals.join(" ") : null;
+    return { kind: "help", topic };
   }
-  if (command === "remove" && (args[1] === "mcp" || args[1] === "skill")) {
-    io.stdout(`${futureStageNotice(`remove ${args[1]}`)}\n`);
-    return { kind: "exit", code: 1 };
+  if (options.version) {
+    if (positionals.length > 0) return errorResult("unexpected_arguments", `--version does not accept a command: ${positionals.join(" ")}`, options.json);
+    return { kind: "version" };
   }
-  if (command === "setup" || command === "doctor") {
-    io.stdout(`${futureStageNotice(command)}\n`);
-    return { kind: "exit", code: 1 };
+  if (positionals.length === 0) {
+    if (!sawToken) return { kind: "help", topic: null };
+    return errorResult("missing_command", "No command was provided. Run with --help to see the available commands.", options.json);
   }
 
-  return unknownCommand(args, io);
+  const [first, second, ...rest] = positionals;
+  const unknown = (): ParsedCli => errorResult("unknown_command", `Unknown command: ${positionals.join(" ")}`, options.json);
+
+  if (first === "mcp") {
+    if (second === "serve" && rest.length === 0) return { kind: "serve" };
+    return unknown();
+  }
+  if (first === "add" || first === "remove") {
+    if (rest.length > 0) return unknown();
+    if (second !== "mcp" && second !== "skill") return unknown();
+    if (options.target !== undefined) return errorResult("unexpected_option", `--target is only valid for setup.`, options.json);
+    if (second === "mcp") {
+      if (options.host === undefined) return errorResult("missing_host", `${first} mcp requires an explicit --host ${KNOWN_HOST_IDS.join("|")}.`, options.json);
+      if (options.scope === undefined) return errorResult("missing_scope", `${first} mcp requires an explicit --scope project|global.`, options.json);
+    } else if (options.scope === undefined) {
+      return errorResult("missing_scope", `${first} skill requires an explicit --scope project|global.`, options.json);
+    }
+    return { kind: "command", operation: first, target: second, options };
+  }
+  if (first === "setup") {
+    if (second !== undefined) return unknown();
+    if (options.target === undefined) return errorResult("missing_target", "setup requires --target mcp|skill|both.", options.json);
+    if ((options.target === "mcp" || options.target === "both") && options.host === undefined) {
+      return errorResult("missing_host", `setup --target ${options.target} requires an explicit --host ${KNOWN_HOST_IDS.join("|")}.`, options.json);
+    }
+    if (options.scope === undefined) return errorResult("missing_scope", `setup --target ${options.target} requires an explicit --scope project|global.`, options.json);
+    return { kind: "command", operation: "setup", target: options.target, options };
+  }
+  if (first === "doctor") {
+    if (second !== undefined) return unknown();
+    if (options.target !== undefined) return errorResult("unexpected_option", "--target is only valid for setup.", options.json);
+    return { kind: "command", operation: "doctor", target: "both", options };
+  }
+  return unknown();
+}
+
+function parsedJson(parsed: ParsedCli): boolean {
+  if (parsed.kind === "error") return parsed.json;
+  if (parsed.kind === "command") return parsed.options.json;
+  return false;
+}
+
+function printError(io: CliIo, code: string, message: string, json: boolean): void {
+  if (json) {
+    io.stdout(`${JSON.stringify({ error: { code, message } }, null, 2)}\n`);
+  } else {
+    io.stderr(`${message}\n`);
+    io.stderr(`${helpText()}\n`);
+  }
+}
+
+function ensureDeps(deps: Partial<CliDeps> | undefined): CliDeps {
+  if (!deps || !deps.io || !deps.adapters || !deps.skillInstaller || !deps.spawn || !deps.now || !deps.packageRoot || !deps.packageVersion) {
+    throw new Error("runCli requires fully specified dependencies (io, adapters, skillInstaller, spawn, now, packageRoot, packageVersion).");
+  }
+  return {
+    ...deps,
+    env: deps.env ?? process.env,
+    cwd: deps.cwd ?? process.cwd(),
+    home: deps.home ?? "",
+    platform: deps.platform ?? process.platform,
+  } as CliDeps;
+}
+
+async function runCommand(parsed: Extract<ParsedCli, { kind: "command" }>, deps: CliDeps): Promise<CliAction> {
+  const { operation, target, options } = parsed;
+  const context: HostContext = { home: deps.home, cwd: deps.cwd, platform: deps.platform, env: deps.env };
+
+  if (operation === "doctor") {
+    const report = await runDoctor({
+      adapters: deps.adapters,
+      skillInstaller: deps.skillInstaller,
+      context,
+      spawn: deps.spawn,
+      now: deps.now,
+      packageRoot: deps.packageRoot,
+      packageVersion: deps.packageVersion,
+    });
+    deps.io.stdout(options.json ? `${JSON.stringify(report, null, 2)}\n` : `${formatDoctor(report)}\n`);
+    return { kind: "exit", code: 0 };
+  }
+
+  const plan = await generatePlan(
+    {
+      operation,
+      target,
+      ...(options.host !== undefined ? { host: options.host } : {}),
+      ...(options.scope !== undefined ? { scope: options.scope } : {}),
+      dryRun: options.dryRun,
+    },
+    {
+      adapters: deps.adapters,
+      skillInstaller: deps.skillInstaller,
+      context,
+      now: deps.now,
+      packageVersion: deps.packageVersion,
+      packageRoot: deps.packageRoot,
+    },
+  );
+
+  // The plan is always printed before confirmation or any write.
+  deps.io.stdout(options.json ? `${planJson(plan)}\n` : `${formatPlan(plan)}\n`);
+
+  const result = await executePlan(plan, {
+    roots: deps.roots ?? [deps.home, deps.cwd],
+    adapters: deps.adapters,
+    io: deps.io,
+    yes: options.yes,
+    ...(deps.backupDir !== undefined ? { backupDir: deps.backupDir } : {}),
+    ...(deps.confirm !== undefined ? { confirm: deps.confirm } : {}),
+    now: deps.now,
+  });
+
+  deps.io.stdout(options.json ? `${JSON.stringify(serializeExecution(result), null, 2)}\n` : `${formatExecution(result)}\n`);
+  const code = result.status === "success" || result.status === "no-op" || result.status === "dry-run" ? 0 : 1;
+  return { kind: "exit", code };
+}
+
+export async function runCli(args: string[], depsInput?: Partial<CliDeps>): Promise<CliAction> {
+  const parsed = parseCli(args);
+  try {
+    const deps = ensureDeps(depsInput);
+    switch (parsed.kind) {
+      case "error":
+        printError(deps.io, parsed.code, parsed.message, parsed.json);
+        return { kind: "exit", code: 1 };
+      case "help":
+        deps.io.stdout(`${parsed.topic ? commandHelp(parsed.topic) : helpText()}\n`);
+        return { kind: "exit", code: 0 };
+      case "version":
+        deps.io.stdout(`${deps.packageVersion}\n`);
+        return { kind: "exit", code: 0 };
+      case "serve":
+        return { kind: "serve" };
+      case "command":
+        return await runCommand(parsed, deps);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const code = error && typeof error === "object" && "code" in error && typeof error.code === "string" ? error.code : "internal_error";
+    const io = depsInput?.io ?? defaultIo;
+    printError(io, code, message, parsedJson(parsed));
+    return { kind: "exit", code: 1 };
+  }
 }
