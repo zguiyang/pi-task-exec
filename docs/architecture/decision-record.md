@@ -179,3 +179,50 @@ Phase 2 已从本新仓库删除 `mcp/.codex/config.toml`：该文件含旧 chec
 - [OpenCode config](https://dev.opencode.ai/docs/config)
 - [OpenCode CLI](https://docs.opencode.ai/docs/cli/)
 - [Node.js release schedule](https://github.com/nodejs/Release)
+
+## 13. 2026-10-09 目录边界复审（覆盖第 4 节旧布局决策）
+
+**状态：推荐结构已审查，尚未实施。** 当前 `mcp/src/`、`mcp/tests/`、`mcp/dist/` 是早期集成阶段的迁移过渡结构，不是最终产品结构。阶段 8 的 CLI 与三种 Host adapter 已完成；目录重构前暂停阶段 9（Skill 安装器），不得把阶段 9 与目录迁移混做一个变更。
+
+产品由一个根 npm 包、一个 CLI 入口、MCP Server 和 Skill 组成。根目录统一管理 CLI、MCP、Skill、测试和文档；不使用 npm Workspaces。最终边界为：
+
+```text
+.
+├── package.json / package-lock.json / README.md / LICENSE / server.json
+├── bin/pi-task-exec.mjs
+├── cli/{index.ts,commands/,hosts/,installers/,plan/}
+├── mcp/{index.ts,tools/,workers/,rpc/,runtime/}
+├── skills/pi-delegate/{SKILL.md,references/}
+├── tests/{cli/,mcp/,hosts/,skills/}
+├── docs/architecture/
+└── dist/                         # 根级生成物，由 Git 忽略
+```
+
+`cli/` 只放 CLI、Host adapter、安装器、计划模型和安全执行器；`mcp/` 只放 MCP Server、工具、Worker、RPC 和运行时；`skills/` 只放 Skill；统一测试和文档分别位于根 `tests/` 与 `docs/`。不保留 `mcp/src/`、`mcp/tests/`、`mcp/dist/`，不把 CLI 放进 MCP，也不把 Host 安装器放进 MCP runtime。`bin/` 仅是薄启动器。Skill 源路径固定为 `skills/pi-delegate/`。
+
+### 结构选型
+
+| 方案 | 评价 | 决定 |
+|---|---|---|
+| A：根 `cli/`、`mcp/`、`skills/`、`tests/`、根 `dist/` | 模块职责直接可见；测试不隶属于某个模块；包路径与最终产品边界一致；Skill 安装器可从包根稳定定位 `skills/pi-delegate/`；不保留过渡 `src/` 包装层 | **推荐** |
+| B：根 `src/cli/`、`src/mcp/`，其余根级 | 源码都统一在 `src/`，但与产品模块命名不一致；`dist/` 镜像层级更深；测试、Skill 源路径与产物之间需要多套约定 | 不选 |
+| C：`cli/`、`mcp/` 各自保留 `src/tests`，根 `dist/` | 统一测试仍被拆散；TypeScript 输出根、测试导入和包规则更复杂；保留旧层次且不满足统一测试目录目标 | 不选 |
+
+### 根构建、入口和分发
+
+- 根 TypeScript 配置从 `cli/**/*.ts` 与 `mcp/**/*.ts` 编译到根 `dist/`。建议 `rootDir: "."`、`outDir: "dist"`，显式 include 两个源码目录，并排除 `tests/`、`dist/`、`node_modules/`。
+- 编译产物固定为 `dist/cli/index.js`（CLI）和 `dist/mcp/index.js`（MCP Server）。CLI 的 `mcp serve` 路由调用 MCP 启动函数；MCP 模块不反向导入 CLI。正常 CLI 命令不初始化 MCP runtime。
+- `bin/pi-task-exec.mjs` 只导入/调用 `../dist/cli/index.js`；根 `package.json.bin` 指向薄入口。checkout 启动参数改为 `node <checkout>/dist/cli/index.js mcp serve`；npm 安装参数仍为 `npx -y @zguiyang/pi-task-exec@<version> mcp serve`。
+- 根 `build`/`prepack` 生成根 `dist/`；不再生成或读取 `mcp/dist/`。根 `.gitignore` 忽略 `dist/`。
+- `server.json` 仍在根目录；`packageArguments` 保持 positional `mcp`、`serve`。由于仓库是单一产品根而非 MCP 子项目，`repository.subfolder: "mcp"` 应移除。版本、npm identifier、Registry ID 约束不变。
+- npm `files` 只允许打入根 `dist/**`、薄 `bin/`、完整 `skills/pi-delegate/**`、必要根文档、许可证和 `server.json`；npm 自动带根 `package.json`。移除 `mcp/dist/**`、`mcp/README.md`、`mcp/LICENSE` 等过渡路径。排除 tests、源码、架构草稿、node_modules 和旧输出。
+- tarball 接受须针对重新构建的真实 `.tgz` 解包核验：`bin` 可运行，CLI help/version 正常，`mcp serve` 可启动，Skill 的 `SKILL.md` 与 references 完整。
+
+### 测试约定
+
+- 根 `npm test` 先构建，再运行根 `tests/`；现有测试逐项语义不变，目标仍为 141 项，不因移动、拆文件或改 import 而删减覆盖。
+- 测试从 `tests/` 通过稳定相对路径导入根 `dist/`，例如 `../../dist/cli/...`、`../../dist/mcp/...`。fake adapters 用于计划、冲突和隔离写入测试；真实 Codex、Zed、OpenCode adapters 仍使用临时 home/cwd 与 mock 环境验证格式、路径、指纹、备份/回滚。
+- MCP smoke test 从薄 `bin/` 启动 `mcp serve`，经 stdio 执行 initialize/list-tools，确认六个现有 `pi_*` 工具和 JSON-RPC 响应。fake Pi 与真实 adapter 的测试边界不变。
+- tarball smoke 在临时目录解包或从压缩包运行，不依赖源码 checkout、npm link、`mcp/dist` 或开发机配置。
+
+目录迁移必须保持 `pi-task-exec mcp serve`、help/version、`add mcp`、`remove mcp`、`setup --target mcp`、`doctor` 契约；三种 Host adapter 接口与 project/global scope；dry-run、计划、冲突检测、备份、回滚、fingerprint；六个现有 `pi_*` MCP 工具；Skill 路径；根 `package.json`、根 `server.json` 和 MCP/Skill tarball 分发语义。阶段 9 只能在目录迁移、完整测试与真实 tarball 验收完成后开始。

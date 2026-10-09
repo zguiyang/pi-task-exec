@@ -171,3 +171,120 @@
 5. CI、Registry schema 和 package/server/Skill 版本检查全部通过。
 6. 从公开 npm tarball 安装后，`pi-task-exec mcp serve` 真实启动 smoke test 通过；无参数不启动 MCP；Registry `packageArguments` 与该 CLI 启动协议完全一致。
 7. 旧远端和本地项目只能在阶段 15 删除；在前置公开验收、备份、迁移说明和 Supervisor 最终确认前，任何人不得执行删除。
+
+## 2026-10-09 目录重构审查与迁移计划
+
+### 当前只读审查结论
+
+阶段 8 的提交为 `d996b2f`（本地 `main`，用户说明尚未推送），工作区检查干净。阶段 9 尚未开始。当前运行时代码、包配置仍采用迁移过渡结构：`mcp/src/` 同时容纳 CLI、Host 安装器和 MCP runtime，测试在 `mcp/tests/`，TypeScript 输出在 `mcp/dist/`。`mcp/src/index.ts` 同时构建 CLI 依赖、路由参数并注册 MCP Server/工具，存在双向职责耦合；`mcp/src/cli.ts` 才是 CLI parser/command implementation，Host adapter 和计划/安全执行器也都放在 MCP 模块。
+
+本次 `npm pack --dry-run --ignore-scripts --json` 因 `/Users/joyzhao/.npm` 缓存目录权限错误退出；仓库中未找到 `.tgz`。因此这里只能确认当前 `package.json.files` 声明的包路径，不把历史阶段记录的 tarball 成功当成本次实际 tarball 证据。当前声明包含 `mcp/dist/**`、Skill、根 README、MCP README、根/MCP LICENSE、`server.json`；npm 自动带根 `package.json`。当前已忽略的 `mcp/dist/` 含 `.js`、`.d.ts`、`.js.map`，含 `hosts/` 子目录。不得把这份路径清单误称为重新解包验证。
+
+当前按 manifest 推导的 tarball 文件树为：`package/package.json`、`package/README.md`、`package/LICENSE`、`package/server.json`、`package/mcp/README.md`、`package/mcp/LICENSE`、`package/mcp/dist/{adapters,cli,doctor,executor,identity,index,io,pi-rpc,plan,safety,skill,types,worker-manager}.{js,d.ts,js.map}`、`package/mcp/dist/hosts/{codex,jsonc,opencode,shared,toml,zed}.{js,d.ts,js.map}`，以及 `package/skills/pi-delegate/SKILL.md`、`package/skills/pi-delegate/references/mcp-contract.md`。根 `package-lock.json`、tests、源码和 node_modules 不在当前 `files` 清单中。此树是 manifest + 当前 ignored dist 的路径推导；本次未能重新 pack 解包确认。
+
+### 当前路径到建议终态的迁移映射
+
+| 当前路径 | 建议终态 | 操作及关联更新 |
+|---|---|---|
+| `package.json` | `package.json` | 保留唯一根 manifest；调整 `bin`、`files`、build/test/typecheck/start/prepack scripts，不使用 Workspaces |
+| `package-lock.json` | `package-lock.json` | 保持根级唯一锁文件；无 workspace 结构 |
+| `server.json` | `server.json` | 保留根路径；参数仍为 `mcp serve`；移除过时 `repository.subfolder: "mcp"`，更新测试/架构说明 |
+| `README.md` | `README.md` | 保留并合并现 `mcp/README.md` 有效说明；更新构建、checkout 入口、结构和 tarball 路径 |
+| `LICENSE` | `LICENSE` | 保留根许可证并作为唯一包许可证来源 |
+| `mcp/LICENSE` | 无（根 `LICENSE`） | 比较来源内容/归属后，不再重复分发；更新包 files 与说明 |
+| `mcp/README.md` | `README.md` | 内容合并后删除重复文件；更新文档内部相对链接 |
+| `mcp/docs/release-standard-baseline.md` | `docs/release-standard-baseline.md` | 移到根文档树，改正相对链接；根包是否分发此文档由 files 清单决定 |
+| `mcp/.gitignore` | 无 | 删除模块忽略文件，把仍需的模式合并到根 `.gitignore` |
+| `mcp/tsconfig.json` | 根 `tsconfig.json` | 重建为根配置，`rootDir: "."`、`outDir: "dist"`，include 根 `cli/**/*.ts`、`mcp/**/*.ts` |
+| `mcp/src/adapters.ts` | `cli/hosts/adapters.ts` | 移动；修正所有相对 import；保持 adapter 接口与计划/doctor 类型兼容 |
+| `mcp/src/cli.ts` | `cli/commands/index.ts` | 移动并重命名；CLI 主路由从 `cli/index.ts` 调用；更新 CLI tests |
+| `mcp/src/doctor.ts` | `cli/commands/doctor.ts` | 移动；这是 Host/Skill 状态的 CLI doctor，不属于 MCP runtime |
+| `mcp/src/executor.ts` | `cli/plan/executor.ts` | 移动；安全执行 Host 安装计划，不属于 MCP worker executor |
+| `mcp/src/identity.ts` | `cli/identity.ts` 与 `mcp/runtime/identity.ts` | 按职责拆分产品/包/Skill 元数据与 MCP server 身份；禁止 MCP 导入 CLI；版本一致性由 package/server metadata test 约束 |
+| `mcp/src/io.ts` | `cli/io.ts` | 移动；只供 CLI 输入输出 |
+| `mcp/src/plan.ts` | `cli/plan/model.ts` | 移动并重命名；含 Host 安装计划、scope、launch spec、Skill target 规划 |
+| `mcp/src/safety.ts` | `cli/plan/safety.ts` | 移动；路径边界、原子写入、备份、恢复、fingerprint 等安全原语 |
+| `mcp/src/skill.ts` | `cli/installers/skill.ts` | 移动；当前 unavailable/stub installer 与后续真实 Skill installer 的接口归 CLI 安装层 |
+| `mcp/src/hosts/codex.ts` | `cli/hosts/codex.ts` | 移动；改相对 import，接口和 scope 契约不变 |
+| `mcp/src/hosts/zed.ts` | `cli/hosts/zed.ts` | 移动；改相对 import，接口和 scope 契约不变 |
+| `mcp/src/hosts/opencode.ts` | `cli/hosts/opencode.ts` | 移动；改相对 import，接口和 scope 契约不变 |
+| `mcp/src/hosts/shared.ts` | `cli/hosts/shared.ts` | 移动；改相对 import；Host 路径/安全能力仍归 adapter 层 |
+| `mcp/src/hosts/jsonc.ts` | `cli/hosts/jsonc.ts` | 移动；JSONC Host config parser |
+| `mcp/src/hosts/toml.ts` | `cli/hosts/toml.ts` | 移动；TOML Host config parser |
+| `mcp/src/pi-rpc.ts` | `mcp/rpc/pi-rpc.ts` | 移动；更新 Worker import |
+| `mcp/src/types.ts` | `mcp/workers/types.ts` | 移动；MCP Worker domain types |
+| `mcp/src/worker-manager.ts` | `mcp/workers/manager.ts` | 移动并重命名；更新 MCP runtime import |
+| `mcp/src/index.ts` | `mcp/index.ts` + `cli/index.ts` + `mcp/tools/*` + `mcp/runtime/*` | 拆分而非原样移动：MCP server/tool definitions 与 stdio lifecycle 留在 MCP；CLI process setup/argument routing 移至 CLI；工具按职责拆到 `mcp/tools/`；MCP 不导入 CLI |
+| `mcp/tests/cli.test.mjs` | `tests/cli/cli.test.mjs` + `tests/mcp/serve-smoke.test.mjs` | 拆 CLI/parser/install-command tests 与 process/stdio MCP smoke；更新 dist/bin 路径 |
+| `mcp/tests/installer.test.mjs` | `tests/hosts/installers.test.mjs` | 移动并改 import；保留三个真实 adapter、隔离环境、scope 和安装/移除语义 |
+| `mcp/tests/fake-pi-contract.test.mjs` | `tests/mcp/fake-pi-contract.test.mjs` | 移动；更新任何 checkout fixture 路径 |
+| `mcp/tests/mcp-runtime.test.mjs` | `tests/mcp/runtime.test.mjs` | 移动；导入 `dist/mcp/` 并更新 smoke fixture 路径 |
+| `mcp/tests/worker-lifecycle.test.mjs` | `tests/mcp/worker-lifecycle.test.mjs` | 移动；导入 `dist/mcp/workers/`、`dist/mcp/rpc/` |
+| `mcp/tests/security.test.mjs` | `tests/cli/security.test.mjs`（必要时拆 hosts 子集） | 安全原语/executor/spawnProcess 覆盖随所有权拆分；调整测试文件可读性，不删 141 项语义 |
+| `mcp/tests/metadata.test.mjs` | `tests/cli/metadata.test.mjs` + `tests/skills/package-content.test.mjs` | 按 CLI/server metadata 与 Skill 包含断言拆分；根路径断言更新 |
+| `mcp/tests/fixtures/fake-pi.mjs` | `tests/mcp/fixtures/fake-pi.mjs` | 移动；所有测试通过 `import.meta.url`/`fileURLToPath` 解析，不依赖 cwd |
+| `skills/pi-delegate/**` | `skills/pi-delegate/**` | 不移动、不改源路径；阶段 9 从此根级资源目录读取 |
+| `mcp/dist/**` | 根 `dist/cli/**`、`dist/mcp/**` | 旧 ignored 产物不搬运；删除旧输出后由根 build/prepack 重建 |
+| `mcp/` | `mcp/` | 保留模块目录，但最终仅含 MCP Server、tools、workers、rpc、runtime；不得留下 CLI、tests 或 build 输出 |
+| `mcp/src/` | `cli/` 与 `mcp/` | 按上表拆分所有源码后删除，不留过渡目录 |
+| `mcp/tests/` | `tests/` | 按上表搬移/拆分测试后删除 |
+| `mcp/dist/` | 根 `dist/` | 不搬运旧 ignored 文件；从新根配置全量重建后删除 |
+| `mcp/docs/` | 根 `docs/` | 搬移其必要文档后删除旧目录 |
+| 根 `.gitignore` | 根 `.gitignore` | 将 `mcp/dist/` 与 `mcp/.pi-task-exec/` 忽略项改为根 `dist/` 等实际需要的模式 |
+| 根 `docs/architecture/*.md` | 同路径 | 保留并更新当前目录决策；README 的路径更新在后续实施阶段 |
+
+当前相对 TS imports 均为模块内 `./`、`../` 路径，移动到 `cli/` 或 `mcp/` 后需按新层级逐一修正；测试统一由 `tests/` 导入根 `dist/`。另更新 README 文本中所有 `mcp/dist/index.js`、`mcp/src`、`mcp/tests` 路径。当前 package `bin` 指向 `./mcp/dist/index.js`；scripts 的 build/typecheck 指向 `mcp/tsconfig.json`，test 指向 `mcp/tests/*.test.mjs`，start 运行 `mcp/dist/index.js`；`files` 包含 `mcp/dist/**` 和 `mcp/README.md`。这些路径必须全部迁到根 `dist/` 和根 tests。`server.json` 的 `packageArguments` 值无需更改，只需核对启动入口与去除已无意义的 subfolder。
+
+#### 当前相对导入/路径引用清单
+
+下面列出源码中的全部相对 TS import specifier，以及测试直接导入/启动的编译路径；`node:` 和第三方依赖不属于仓库内相对导入。搬移后所有导入需按归属与新目录重算，测试只允许指向根 `dist/`，不允许再穿越到 `mcp/dist/`。
+
+| 当前文件 | 当前相对引用 | 终态处理 |
+|---|---|---|
+| `mcp/src/adapters.ts` | `./plan.js`, `./identity.js`, `./hosts/codex.js`, `./hosts/opencode.js`, `./hosts/zed.js` | 改为 `cli/hosts/` 内 adapter registry 的相对引用 |
+| `mcp/src/cli.ts` | `./adapters.js`, `./doctor.js`, `./identity.js`, `./io.js`, `./plan.js`, `./skill.js`, `./executor.js` | 全部改为 `cli/` 内相对路径；如拆 `commands/` 则从命令目录回到 `cli/` |
+| `mcp/src/doctor.ts` | `./adapters.js`, `./plan.js`, `./skill.js`, `./identity.js` | 改为 CLI commands 到 CLI host/plan/installer/identity 的路径 |
+| `mcp/src/executor.ts` | `./adapters.js`, `./io.js`, `./plan.js`, `./safety.js` | 改为 `cli/plan/` 到 CLI host/io/model/safety 的路径 |
+| `mcp/src/identity.ts` | 无 | 拆为 CLI identity 与 MCP runtime identity；不建立跨层导入 |
+| `mcp/src/index.ts` | `./adapters.js`, `./cli.js`, `./doctor.js`, `./io.js`, `./skill.js`, `./worker-manager.js` | 拆入口；`cli/index.ts` 调度 CLI，`mcp/index.ts` 只连接 MCP runtime 的本地模块 |
+| `mcp/src/io.ts` | 无 | 保留在 CLI 层，无 import 改动 |
+| `mcp/src/plan.ts` | `./adapters.js`, `./skill.js`, `./identity.js`, `./safety.js` | 改为 CLI plan 到 CLI host/installer/identity/safety 的路径 |
+| `mcp/src/safety.ts` | 无仓库相对 import（含动态 `node:fs/promises`） | 移入 CLI 安全层；builtin import 不变 |
+| `mcp/src/skill.ts` | `./plan.js` | 改为 CLI installer 到 CLI plan model 的路径 |
+| `mcp/src/worker-manager.ts` | `./pi-rpc.js`, `./types.js`（其中 types 有第二次 `./types.js`） | 改为 MCP workers 到 `../rpc/pi-rpc.js` 和本地 worker types |
+| `mcp/src/pi-rpc.ts` | `./types.js` | 改为 MCP rpc 到 `../workers/types.js` |
+| `mcp/src/types.ts` | 无 | 移入 MCP workers；无仓库相对 import |
+| `mcp/src/hosts/codex.ts` | `../adapters.js`, `../identity.js`, `../plan.js`, `./shared.js`, `./toml.js` | 改为 `cli/hosts/` 内 registry/model/identity/parser 路径 |
+| `mcp/src/hosts/opencode.ts` | `../adapters.js`, `../identity.js`, `../plan.js`, `./jsonc.js`, `./shared.js` | 改为 `cli/hosts/` 内 registry/model/identity/parser 路径 |
+| `mcp/src/hosts/shared.ts` | `../adapters.js`, `../plan.js`, `../safety.js` | 改为 CLI host 到 CLI registry/model/safety 的路径 |
+| `mcp/src/hosts/zed.ts` | `../adapters.js`, `../identity.js`, `../plan.js`, `./jsonc.js`, `./shared.js` | 改为 `cli/hosts/` 内 registry/model/identity/parser 路径 |
+| `mcp/src/hosts/jsonc.ts`, `mcp/src/hosts/toml.ts` | 无仓库相对 import | 移至 `cli/hosts/`；第三方 parser import 不变 |
+| `mcp/tests/cli.test.mjs` | `../dist/cli.js`, `../dist/adapters.js`, `../dist/doctor.js`, `../dist/safety.js`, `../dist/skill.js`; `dist/index.js` entrypoint | 拆分后引用 `../../dist/cli/...`，stdio smoke 改为启动 `bin/pi-task-exec.mjs` |
+| `mcp/tests/installer.test.mjs` | `../dist/adapters.js`, `cli.js`, `identity.js`, `hosts/jsonc.js`, `plan.js`, `skill.js`; fixture 字符串中的 `mcp/dist/index.js` | 改为 `../../dist/cli/...`；checkout 断言改为根 `dist/cli/index.js` |
+| `mcp/tests/security.test.mjs` | `../dist/safety.js`, `../dist/executor.js`, `../dist/doctor.js` | 改为 `../../dist/cli/plan/...` 与 `../../dist/cli/commands/doctor.js` |
+| `mcp/tests/metadata.test.mjs` | `../dist/cli.js`；运行时读取根 `package.json`、`server.json` | 改为根 dist CLI metadata 与根 package/server 断言 |
+| `mcp/tests/mcp-runtime.test.mjs` | spawn `resolve(root, "dist/index.js")` | 从 `tests/mcp/` 启动薄 `bin/pi-task-exec.mjs mcp serve`；核验 JSON-RPC |
+| `mcp/tests/worker-lifecycle.test.mjs` | `../dist/worker-manager.js` | 改为 `../../dist/mcp/workers/manager.js` |
+| `mcp/tests/fake-pi-contract.test.mjs`, `mcp/tests/fixtures/fake-pi.mjs` | 无测试静态相对模块 import；fixture 由路径拼接使用 | 保留 fixture 解析但从 `tests/mcp/fixtures/` 计算，不依赖 cwd |
+
+另有测试中的 checkout 字符串断言 `join(repo, "mcp", "dist", "index.js")`（installer tests 多处）；均改为 `join(repo, "dist", "cli", "index.js")`。README 中的 `node mcp/dist/index.js`、`mcp/src`、`mcp/tests` 也需要同步更新。当前 scripts、bin、files、server 路径已在上节列出；root build/prepack、npm bin、server packageArguments 与 Host launch spec 必须使用同一入口契约。
+
+### 分阶段实施（每阶段可独立提交；本次未执行）
+
+| 阶段 | 修改范围 | 验收条件 | 回滚方式 | npm tarball 影响 | 阶段 9 影响 |
+|---|---|---|---|---|---|
+| 1. 建立根级目录骨架 | 建立 `cli/`、`tests/`、根配置目标；先不改运行逻辑 | 所有者目录和预定产物路径清楚，无旧路径兼容承诺 | 删除空目录/撤销该提交 | 无 | 仍暂停 |
+| 2. 移动 MCP runtime | `mcp/index.ts`、tools/workers/rpc/runtime；先隔离 MCP server | MCP 模块无 CLI/Host installer import；六工具契约保持 | 还原本阶段移动/拆分 | 暂不接受包 | 仍暂停 |
+| 3. 移动 CLI 与 Host adapter | `cli/` 各子目录，Host adapter 全部归 CLI | CLI 功能与 host 契约完整，MCP 不含安装器 | 还原路径并保留阶段 2 的独立 MCP 边界 | 暂不接受包 | 仍暂停 |
+| 4. 移动测试 | 全部测试与 fixture 到根 `tests/{cli,mcp,hosts,skills}` | 141 项既有测试语义有清单映射，所有导入定位根 dist | 恢复测试路径，源代码不动 | 无直接影响 | 仍暂停 |
+| 5. 修改 TypeScript 构建配置 | 根 `tsconfig.json`，移除模块 tsconfig | 输入只含 CLI/MCP 源，输出为 `dist/cli/` 与 `dist/mcp/` | 恢复旧 tsconfig；不删除旧产物 | 构建路径改变，未接受包 | 仍暂停 |
+| 6. 修改 package scripts | root build/typecheck/test/start/prepack 路径 | `test` 先 build；测试根路径；start 使用 CLI 路由 | 恢复 scripts | `prepack` 新产物布局 | 仍暂停 |
+| 7. 修改 bin | 建薄 `bin/pi-task-exec.mjs` 并改 manifest bin | help/version/serve 由 CLI 入口路由，bin 无业务实现 | 恢复 bin 指向前保留旧文件 | tarball bin 路径改变 | 仍暂停 |
+| 8. 修改 server.json | 保持 packageArguments；删除 subfolder | Registry schema 与 CLI 命令契约一致 | 恢复元数据行 | tarball metadata 改变 | 仍暂停 |
+| 9. 修改所有 imports 和资源路径 | 源、测试、fixture、README 相对路径 | 无旧 dist/src/tests 路径；MCP/CLI 边界通过独立审查 | 按模块回退引用变更 | tarball 入口路径改变 | 仍暂停 |
+| 10. 完整测试 | build/typecheck/141 项测试/MCP stdio smoke | 既有测试语义全部保留，命令契约与六工具正确 | 不通过则回到对应阶段，不进入清理 | 候选产物尚未发布 | 仍暂停 |
+| 11. 真实 npm tarball 验证 | 干净 build、pack、解包、安装后运行 bin | 包含 dist/bin/Skill/文档/许可证/server；不含 tests/旧 mcp/dist；help/version/serve 正常 | 丢弃候选 tarball 与临时目录，修复重测 | **首次接受新包布局** | 通过后才可考虑开始 |
+| 12. 删除旧目录 | 删除 `mcp/src/`、`mcp/tests/`、`mcp/dist/`、旧 tsconfig/重复文档 | `rg` 无旧路径依赖；不留兼容 wrapper；完整回归通过 | 从该阶段提交回滚；根新结构仍保留 | 源包规则不变；旧路径消失 | 目录验收完成后解锁 |
+| 13. 提交并推送 | 仅提交审查完成的迁移文件并推送授权分支 | diff、测试、tarball、文档和提交范围由 Supervisor 审阅 | revert commit；不做 force push | 若此前 tarball已验收则布局稳定 | 完成后独立启动阶段 9 |
+
+任何阶段都不得改变命令契约、adapter interface、scope、安全安装行为、六个现有 MCP tools 或 Skill 根源路径；不得以“兼容”为由保留 `mcp/src`、`mcp/tests` 或 `mcp/dist`。本审查阶段只更新架构文档，不实施上述迁移，不运行 build/test/pack，不提交或推送。
