@@ -1,20 +1,20 @@
 # Pi TaskExec 实施计划
 
-状态：阶段 1–5 已完成；阶段 6 的旧 CLI 退役、新入口路由及产品标识更新，以及阶段 7 的统一 CLI 框架（纯解析器/路由、共享计划模型、可独立测试的执行器、Host 适配器接口与安全原语）已在 2026-10-09 用户授权下实施，等待 Supervisor 审查；阶段 8 的真实 Host 路径/格式适配与阶段 9 的通用 Skill 安装器仍显式延后；npm 与 MCP Registry 均未发布。后续安装器与发布阶段仍须按各自门槛执行。
-日期：2026-10-08
+状态：阶段 1–5 已完成；阶段 6 已完成，待 Supervisor 审查；阶段 7 已完成，待 Supervisor 审查（提交 `bba829b`）；阶段 8、9、10 未开始；npm 和 MCP Registry 均未发布。
+日期：2026-10-09
 
-本计划按依赖顺序执行。任何阶段均不得越过公开发布门槛；Registry ID 冲突时停止，不回退旧名称。阶段 3–6 已按各自授权完成或正在审查；后续阶段仍须单独遵守其授权和发布门槛。
+本计划按依赖顺序执行。任何阶段均不得越过公开发布门槛；Registry ID 冲突时停止，不回退旧名称。阶段 1–6 已完成，阶段 6、7 待 Supervisor 审查；后续阶段仍须单独遵守其授权和发布门槛。
 
 ## 阶段 1：许可证和命名验证
 
 - **前置依赖**：接受本计划；可访问 npm 与 MCP Registry 查询服务；可确认 GitHub namespace 发布身份。
 - **修改范围**：无仓库代码修改；外部只读查询。
-- **具体任务**：精确查询 `@zguiyang/pi-task-exec` 是否已存在；精确查询 `io.github.zguiyang/pi-task-exec` 是否已存在；验证 namespace 发布权；向 Skill 原作者/权利人确认再分发权限及许可证。若 Registry ID 被占用，停止并报告，不选择旧名。
+- **具体任务**：精确查询 npm package `@zguiyang/pi-task-exec` 是否已存在；精确查询 MCP Registry name `io.github.zguiyang/pi-task-exec` 是否已存在；验证 namespace 发布权；向 Skill 原作者/权利人确认再分发权限及许可证。若 Registry name 被占用，停止并报告，不选择旧名。
 - **验收条件**：保存官方服务查询证据；明确 package/Registry ID 可用性和发布身份；有明确 Skill 授权/许可证结论。
 - **回滚方式**：不写入仓库；结束检查即可。
 - **公开发布影响**：无。
 - **人工决策**：必须确认 Skill 授权、目标名称及 namespace 权限。
-- **阶段 1 结果（已完成）**：`npm view @zguiyang/pi-task-exec` 返回 E404（当前无已发布包，不构成预留或发布权利）；官方 MCP Registry 精确搜索返回 HTTP 200、count 0；官方 `mcp-publisher validate` 对目标 server name 和 npm package identifier 通过；发布身份已确认（`gh api user`=`zguiyang`、`gh repo view`=PUBLIC+ADMIN、`npm whoami`=`zhaoguiyang`、`npm org ls zguiyang`=owner）；JoeyZhao 确认 Skill 直接创作/版权、MIT 再分发、无需单独 NOTICE。尚未发布任何 npm 包或 Registry 记录；未实际执行 Registry OAuth/OIDC 发布，未来 OIDC 工作流需要 `id-token: write`。
+- **阶段 1 结果（已完成）**：`npm view @zguiyang/pi-task-exec` 返回 E404（当前无已发布包，不构成预留或发布权利）；官方 MCP Registry 精确搜索返回 HTTP 200、count 0；官方 `mcp-publisher validate` 对目标 Registry name 和 npm package identifier 通过；发布身份已确认（`gh api user`=`zguiyang`、`gh repo view`=PUBLIC+ADMIN、`npm whoami`=`zhaoguiyang`、`npm org ls zguiyang`=owner）；JoeyZhao 确认 Skill 直接创作/版权、MIT 再分发、无需单独 NOTICE。尚未发布任何 npm 包或 Registry 记录；未实际执行 Registry OAuth/OIDC 发布，未来 OIDC 工作流需要 `id-token: write`。
 
 ## 阶段 2：Git 初始化和仓库基础文件
 
@@ -25,17 +25,18 @@
 - **回滚方式**：未提交前恢复文件；初始化 Git 后由 Supervisor 决定是否移除 `.git`，不得自动重写历史。
 - **公开发布影响**：无。
 - **人工决策**：许可证边界和源历史/归属保留方式。
-- **执行状态**：仓库基础文件、Skill frontmatter、旧本机配置清理、Git 初始化及阶段 1 证据文档更正均已完成；本地暂存并创建首个迁移基线提交是本阶段最后的验收步骤，完成后阶段 2 即完成。首个提交之后仍需 Supervisor 审查；阶段 3 及以后仍须单独授权。
+- **执行状态（已完成）**：仓库基础文件、Skill frontmatter、旧本机配置清理、Git 初始化及阶段 1 证据文档更正均已完成；阶段 2 已通过首个迁移基线提交完成。
 
 ## 阶段 3：根 package.json 与 lockfile 整合
 
 - **前置依赖**：阶段 2 完成；新 npm 名确认可用；Skill 授权确定。
 - **修改范围**：根 `package.json`、根 `package-lock.json`、必要 package 元信息；移除旧位置的 package 发布入口后由 Supervisor 审查。
-- **具体任务**：设置 `@zguiyang/pi-task-exec`、`mcpName: io.github.zguiyang/pi-task-exec`、`bin: pi-task-exec`；将 `files` 指向 `mcp/dist/**`、`skills/pi-delegate/**`、根文档、`server.json` 和许可证文件；依赖只安装/锁定一次；不引入 Workspaces。
+- **具体任务**：设置 npm package `@zguiyang/pi-task-exec`、MCP Registry name `io.github.zguiyang/pi-task-exec`、CLI/bin `pi-task-exec`；将 `files` 指向 `mcp/dist/**`、`skills/pi-delegate/**`、根文档、`server.json` 和许可证文件；依赖只安装/锁定一次；不引入 Workspaces。
 - **验收条件**：根 manifest 是唯一 npm 包权威来源；lockfile root metadata 一致；无旧包名/CLI bin 配置。
 - **回滚方式**：恢复根 package 与 lockfile；不得覆盖已发布 npm 版本。
 - **公开发布影响**：无，除非发布阶段获批。
 - **人工决策**：最终版本号；建议 `0.2.0`，不建议当前直接 `1.0.0`。
+- **执行状态（已完成）**：根 `package.json` 和 lockfile 已整合新包名、CLI bin、构建入口和打包清单。
 
 ## 阶段 4：MCP 构建路径迁移
 
@@ -50,18 +51,19 @@
 ## 阶段 5：Skill 随包打包
 
 - **前置依赖**：阶段 1 授权确认；阶段 3 根包 `files` 定义。
-- **修改范围**：根 package 打包清单、Skill 元数据/兼容清单、文档。
-- **具体任务**：保留 `skills/pi-delegate/SKILL.md` 和 `references/` 原结构；声明 Skill 修订与最低 MCP 契约；不拆 Skill npm 包、不移动到 `packages/skill/`。
-- **验收条件**：npm tarball 内含完整 Skill 目录和兼容 manifest；路径在解包后可被 CLI 定位。
-- **回滚方式**：去掉打包项并回退兼容元数据；在许可未确定时不发布。
+- **修改范围**：根 package 打包清单、Skill frontmatter/references、文档。
+- **具体任务**：保留 `skills/pi-delegate/SKILL.md` 和 `references/` 原结构；不拆 Skill npm 包、不移动到 `packages/skill/`。最低 MCP 契约版本及机器可读兼容清单属于阶段 10，不属于本阶段。
+- **验收条件**：真实 npm tarball 完整包含 `mcp/dist/` 和 `skills/pi-delegate/`；Skill frontmatter 与 references 验证通过；测试、`node_modules`、`.codex` 和临时文件均被排除。
+- **回滚方式**：去掉打包项；在许可未确定时不发布。
 - **公开发布影响**：无。
-- **人工决策**：Skill 对用户可见的 license/compatibility 元数据。
+- **人工决策**：无新增决策；最低 MCP 契约版本和机器可读兼容清单留待阶段 10。
+- **执行状态（已完成）**：已生成真实 npm tarball，确认完整包含 `mcp/dist/` 与 `skills/pi-delegate/`，验证 Skill frontmatter 和 references，并排除测试、`node_modules`、`.codex` 与临时文件；未冻结最低 MCP 契约版本，也未实现机器可读兼容清单。
 
 ## 阶段 6：旧 CLI 与旧标识清理
 
 - **前置依赖**：阶段 3、4 的新包入口设计完成；工具名决策被接受。
 - **修改范围**：CLI、MCP 名称常量、Host 配置 key、文档、测试和打包文件。
-- **具体任务**：删除旧 bin、旧 package 名、旧 Registry ID 和旧配置 key；不保留兼容 alias/wrapper/deprecated 逻辑；保留仅用于迁移来源说明的历史上下文。新 Host 配置键采用新 ID，例如 `pi-task-exec`。
+- **具体任务**：删除旧 bin、旧 package 名、旧 Registry name 和旧配置 key；不保留兼容 alias/wrapper/deprecated 逻辑；保留仅用于迁移来源说明的历史上下文。新 Host 配置键采用新的 CLI 名，例如 `pi-task-exec`。
 - **验收条件**：全局搜索确认运行时代码与现行文档无旧名称；发布文件不含旧入口；历史记录中如需引用，有明确历史语义。
 - **回滚方式**：在发布前回退代码；发布后不能重用版本，必须用新版本修复。
 - **公开发布影响**：尚无用户的前提必须人工再次确认；进入公开发布即为破坏性首发契约。
@@ -72,7 +74,7 @@
 
 - **前置依赖**：阶段 3、6 完成；命令行为和确认模型已定。
 - **修改范围**：CLI 模块及专用测试。
-- **具体任务**：实现 `add mcp`、`add skill`、`setup`、`doctor`、建议的 `remove mcp|skill`、`mcp serve` 与 `--version`；加入显式 Host/scope、计划预览、dry-run、冲突提示和备份策略。将 `pi-task-exec mcp serve` 定义为 MCP Host/Registry 唯一明确的服务启动入口，并单独实现和测试该命令路由。
+- **具体任务**：实现 `add mcp`、`add skill`、`setup`、`doctor`、建议的 `remove mcp|skill`、`mcp serve` 与 `--version`；加入显式 Host/scope、计划预览、dry-run、冲突提示和备份策略。将 `pi-task-exec mcp serve` 定义为 MCP Host 配置与 Registry entry 唯一明确的服务启动入口，并单独实现和测试该命令路由。
 - **验收条件**：默认不修改所有 Host；用户可看到写入文件和覆盖行为；无参数时只显示清晰帮助/错误并返回明确状态，绝不能启动 MCP，也不能复现含糊的旧 CLI 默认行为；取消交互不写文件。
 - **回滚方式**：移除新 CLI 改动，保留 MCP Worker 运行时代码。
 - **公开发布影响**：无。
@@ -103,7 +105,7 @@
 
 - **前置依赖**：阶段 6 命名决策，阶段 5 Skill 包装方案。
 - **修改范围**：MCP 工具注册、类型/描述、Skill、reference、README、样例、Registry description、契约测试。
-- **具体任务**：将工具改为 `task_*`；统一 Delegation-First 规则；同步 profile/mode/continuation/worktree/--no-session/terminal 状态语义；写机器可检验的最低契约版本。
+- **具体任务**：将工具改为 `task_*`；统一 Delegation-First 规则；同步 profile/mode/continuation/worktree/--no-session/terminal 状态语义；定义最低 MCP 契约版本并写入机器可读兼容清单。
 - **验收条件**：源码注册、测试 schema、Skill/reference/示例一致；无旧 alias；Worker 边界没有被描述为文件系统沙箱；Supervisor 保留验收责任。
 - **回滚方式**：发布前可整组回退名称；不得只回退 Skill 或只回退 MCP。
 - **公开发布影响**：构成新 MCP API 首发契约。
@@ -124,7 +126,7 @@
 - **前置依赖**：阶段 11 全绿；许可证已确认。
 - **修改范围**：仅临时构建目录与候选包。
 - **具体任务**：执行 npm pack 到临时目录；检查文件清单；在干净临时 prefix 安装 tarball；从该安装目录调用真实 bin，运行 `pi-task-exec mcp serve` 的启动 smoke test；检查 Skill 可安装、依赖可解析、MCP stdio 可初始化并返回工具列表。核对 Registry `packageArguments` 逐项等于实际 CLI 参数 `mcp serve`。
-- **验收条件**：MCP 和 Skill 均在 tarball 中；无测试、node_modules、个人路径、旧包名、旧 CLI、旧 Registry ID；已安装 tarball 中的真实 `pi-task-exec mcp serve` 成功启动 MCP；无参数不会启动服务；Registry 启动参数与通过测试的 CLI 契约完全一致。
+- **验收条件**：MCP 和 Skill 均在 tarball 中；运行时代码中没有旧产品名称；`package.json`、`server.json`、bin 和当前安装说明中没有旧名称；tarball 不包含旧 CLI 入口、旧 bin、旧 package metadata 或旧 Registry metadata。README 的迁移历史可以保留旧项目名作为历史来源说明，不将这类历史说明判作运行时残留。已安装 tarball 中的真实 `pi-task-exec mcp serve` 成功启动 MCP；无参数不会启动服务；Registry 启动参数与通过测试的 CLI 契约完全一致。
 - **回滚方式**：丢弃未发布 tarball 和临时目录；修复后重新验收。
 - **公开发布影响**：无。
 - **人工决策**：Supervisor 最终包清单审阅。

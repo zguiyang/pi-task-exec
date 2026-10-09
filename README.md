@@ -12,12 +12,13 @@ status/result → Supervisor review and acceptance. `inspect`/`implement` are
 tool capability profiles and `direct`/`worktree` are working-directory modes;
 neither is an operating-system security sandbox.
 
-> Status: Phase 6 (old CLI and old product-identifier cleanup) and the stage 7
-> unified CLI framework have been implemented in this checkout at version
-> `0.1.1`. Real host path/config adaptation (stage 8) and the generic skill
-> installer (stage 9) remain deferred. The changes await Supervisor review;
-> nothing has been published. `mcp/dist/` is generated build output from
-> `mcp/src/`.
+> Status: Phases 6 and 7 have been implemented in this checkout and await
+> Supervisor review. Stage 8 real Host configuration adaptation, stage 9 the
+> generic `.agents/skills/` installer, and stage 10 MCP/Skill contract
+> synchronization and tool renaming have not started. The npm package and MCP
+> Registry entry have not been published. For current development, build from
+> source and run `node mcp/dist/index.js mcp serve`; `mcp/dist/` is generated
+> output from `mcp/src/`.
 
 ## CLI surface
 
@@ -47,12 +48,13 @@ emits stable, secret-free JSON; `--yes` may skip confirmation only after the
 plan is printed. Any conflict blocks the whole operation, and `--host` and
 `--scope` are mandatory for MCP add/remove/setup.
 
-Stage 7 defers real MCP path/config adaptation to stage 8 and the generic
-`.agents/skills` installer to stage 9. The registered Codex, Zed, and OpenCode
-adapters therefore mark real MCP installation/removal as unsupported instead of
-guessing a path or writing unknown config, and skill operations report
-pending/unavailable. No host config or skill file is written by `add`, `remove`,
-or `setup` in this checkout.
+The current `pi_*` MCP tools remain in place; their migration to `task_*` is
+planned for stage 10. Stage 7 defers real MCP path/config adaptation to stage 8
+and the generic `.agents/skills` installer to stage 9. The registered Codex,
+Zed, and OpenCode adapters therefore mark real MCP installation/removal as
+unsupported instead of guessing a path or writing unknown config, and skill
+operations report pending/unavailable. No host config or skill file is written
+by `add`, `remove`, or `setup` in this checkout.
 
 Any unrecognized input, including the removed top-level `serve`, `version`,
 `update`, and `uninstall` routes and the unsupported `--all-hosts` flag,
@@ -60,15 +62,18 @@ reports an error and exits `1`.
 
 ## Current status and non-claims
 
-Phase 6 and the stage 7 CLI framework are implemented in this checkout and
-await Supervisor review. The following are **not** implemented and are **not**
-claimed:
+Phases 6 and 7 are implemented in this checkout and await Supervisor review.
+The following are **not** implemented and are **not** claimed:
 
-- no npm packaging or publication, and no MCP Registry record;
-- no real host MCP install/remove and no verified cross-platform host paths or
-  config formats (stage 8);
-- no generic `.agents/skills` installer (stage 9); skill operations report
-  pending/unavailable;
+- the npm tarball has been generated locally, but the package has not been
+  published and cannot currently be installed from npm; no MCP Registry record
+  has been published;
+- stage 8 real Host configuration adaptation has not started: no real host MCP
+  install/remove or verified cross-platform host paths/config formats;
+- stage 9 generic `.agents/skills/` installer has not started; skill operations
+  report pending/unavailable;
+- stage 10 tool migration has not started; the existing `pi_*` tools remain
+  and migration to `task_*` is planned for that stage;
 - `doctor` is read-only and does not prove that a host configuration works;
 - no release or version compatibility promise.
 
@@ -79,8 +84,7 @@ claimed:
 | Product | Pi TaskExec |
 | npm package | `@zguiyang/pi-task-exec` |
 | CLI / `bin` | `pi-task-exec` |
-| MCP Registry ID | `io.github.zguiyang/pi-task-exec` |
-| MCP server name | `pi-task-exec` |
+| MCP Registry name | `io.github.zguiyang/pi-task-exec` |
 | Skill | `pi-delegate` |
 
 Phase 1 (2026-10-08) resolved the naming, identity, and Skill-licensing
@@ -92,7 +96,7 @@ questions with the following evidence:
   future registration.
 - Exact MCP Registry search for `io.github.zguiyang/pi-task-exec` returned
   HTTP 200 with `count: 0`; no matching record exists.
-- Official `mcp-publisher validate` on the target server name and npm package
+- Official `mcp-publisher validate` on the target Registry name and npm package
   identifier passed.
 - Publishing identity was confirmed: `gh api user` reports `zguiyang`,
   `gh repo view` reports the repository as PUBLIC with ADMIN access,
@@ -122,7 +126,8 @@ occupied at publication time.
 `mcp/dist/` is generated build output from `mcp/src/` and is intentionally not
 tracked. The root `package.json`, `package-lock.json`, and `server.json` carry
 the new identity. Phase 6 CLI routing and the integrated test suite are
-verified; npm packaging and publication remain pending.
+verified; public npm publication and stage 12 tarball acceptance remain
+pending.
 
 ## Migration history
 
@@ -146,10 +151,14 @@ initialized fresh in this checkout.
 
 ## Installation
 
-There is no published package and no supported installation route yet. The
-`add`/`remove`/`setup` commands currently generate and print plans only; real
-host installation is deferred. To register the MCP manually with a stdio
-client, use the launch contract:
+The npm package has not been published, so it cannot currently be installed
+from npm. The `add`/`remove`/`setup` commands currently generate and print plans
+only; real host installation is deferred. During current development, build
+from source and launch with `node mcp/dist/index.js mcp serve`.
+
+After version `0.1.1` is published, this will be a future npm-based stdio launch
+example. This command is executable only after the corresponding version has
+been published:
 
 ```text
 command: npx
