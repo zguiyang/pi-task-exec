@@ -37,6 +37,19 @@ export type McpRemovalPlanResult =
   | { kind: "conflict"; conflict: PlanConflict }
   | { kind: "unsupported"; capability: UnsupportedCapability };
 
+/**
+ * Result of planning an `update` for one already-installed MCP entry. `absent`
+ * means no entry exists and `update` must never create one; `no-op` means the
+ * entry already equals the target launch; `update` carries the rewritten
+ * content. `current` is the installed version token or checkout launch path.
+ */
+export type McpUpdatePlanResult =
+  | { kind: "absent"; path: string }
+  | { kind: "no-op"; path: string; current: string; warnings: PlanWarning[] }
+  | { kind: "update"; path: string; content: string; current: string; warnings: PlanWarning[] }
+  | { kind: "conflict"; conflict: PlanConflict }
+  | { kind: "unsupported"; capability: UnsupportedCapability };
+
 export interface FileWriteOptions {
   roots: readonly string[];
   mode?: number;
@@ -106,6 +119,8 @@ export interface HostAdapter {
   writeConfig(path: string, content: string, options: FileWriteOptions): Promise<void>;
   planEntry(input: McpPlanInput): McpEntryPlanResult;
   planRemoval(input: McpPlanInput): McpRemovalPlanResult;
+  /** Update only a provably managed entry; never create an absent one. */
+  planUpdate(input: McpPlanInput): McpUpdatePlanResult;
   doctorChecks(context: HostContext, scope: Scope, launch: McpLaunchSpec): Promise<DoctorCheck[]>;
 }
 

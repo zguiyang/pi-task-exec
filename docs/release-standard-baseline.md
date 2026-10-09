@@ -4,8 +4,9 @@ Historical release baseline checked on 2026-10-08. Directory and command
 references below are updated for the approved 2026-10-09 root layout; detailed
 current ownership boundaries are recorded in `architecture/decision-record.md`.
 
-Checked for Release Engineering V0.1 on 2026-10-08. Product identity updated for
-Pi TaskExec v0.1.1.
+The first public release target is Pi TaskExec v0.1.0. The 2026-10-08 release
+engineering baseline below is retained as historical implementation context;
+the current installation and update behavior is documented in the README.
 
 ## Common distribution contract
 
@@ -28,8 +29,8 @@ Pi TaskExec v0.1.1.
 - The package ships the root build output (`dist/**`), including the MCP
   runtime (`dist/mcp/**`) and the CLI (`dist/cli/**`), plus the `pi-delegate`
   Skill (`skills/pi-delegate/**`). The CLI supports MCP `add`, `remove`,
-  `setup`, and `doctor`, plus `add skill`; the combined `setup`/`update` flows
-  and `remove skill` remain deferred. The package engine floor is Node
+  `setup`, `update`, and `doctor`, plus `add skill`; `remove skill` remains
+  deferred. The package engine floor is Node
   `>=22.20.0`, matching the pinned `skills@1.7.1` Skill installer.
 
 ## Host contract
@@ -54,8 +55,8 @@ scope locations, and trust rules.
 
 ## Skill distribution contract
 
-`pi-task-exec add skill --host <codex|zed|opencode> --scope <project|global>`
-installs `pi-delegate` through the pinned Vercel Skills CLI `skills@1.7.1` from
+`pi-task-exec setup` installs `pi-delegate` through the pinned Vercel Skills
+CLI `skills@1.7.1` from
 the fixed GitHub source `https://github.com/zguiyang/pi-task-exec` (`skills/pi-delegate`
 subpath). The release ref is `v${packageVersion}`; source-checkout validation
 uses the full commit `f914707fa22fd658f50e059a5091440796ef39e0`. The CLI is
@@ -63,6 +64,10 @@ always invoked with `shell: false`, explicit `--agent`/`--copy`/`--yes`/`--json`
 and telemetry disabled. The job is only complete when the installed files and
 the lockfile record the requested source/ref; exit code alone is not accepted.
 The install is not transactional and no rollback is promised.
+
+`pi-delegate` is maintained only at `skills/pi-delegate/` in the
+`zguiyang/pi-task-exec` repository. The general-purpose `zguiyang/agent-skills`
+repository remains active and retains its unrelated Skills.
 
 ## Sources
 

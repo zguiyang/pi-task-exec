@@ -73,8 +73,23 @@ export interface SkillCliPlan {
   lockFile: string;
   expectedSource: string;
   expectedRef: string;
+  /** For update: the ref recorded by the installed lockfile. */
+  currentRef?: string;
   safety: SkillCliSafetyFinding[];
   lossWarning: boolean;
+}
+
+/**
+ * Read-only discovery result for an `update` skill plan. Both the expected
+ * install directory and a valid lock record for the fixed source are required;
+ * anything else is a conflict (reported separately on the plan).
+ */
+export interface SkillUpdateDiscovery {
+  state: "absent" | "no-op" | "update";
+  installDir: string;
+  lockFile: string;
+  desiredRef: string;
+  currentRef?: string;
 }
 
 export interface SkillPlan {
@@ -85,6 +100,8 @@ export interface SkillPlan {
   warnings: PlanWarning[];
   /** Present only for the CLI-backed `add skill` installer. */
   cli?: SkillCliPlan;
+  /** Present for `update`: the discovered install state and current/target refs. */
+  update?: SkillUpdateDiscovery;
 }
 
 export type SkillPlanResult =

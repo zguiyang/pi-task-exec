@@ -1,7 +1,7 @@
-import type { McpEntryPlanResult, McpPlanInput, McpRemovalPlanResult } from "./adapters.js";
+import type { McpEntryPlanResult, McpPlanInput, McpRemovalPlanResult, McpUpdatePlanResult } from "./adapters.js";
 import { SERVER_ID } from "../identity.js";
 import type { HostContext, PlanConflict, PlanWarning, Scope } from "../plan/model.js";
-import { BaseHostAdapter, absoluteEnvPath, deepEqual, envPath, pathForPlatform, type HostInspection } from "./shared.js";
+import { BaseHostAdapter, absoluteEnvPath, classifyManagedEntry, deepEqual, envPath, pathForPlatform, type HostInspection } from "./shared.js";
 import { parseToml, readTomlEntry, removeTomlTable, TomlEditError, upsertTomlTable } from "./toml.js";
 
 const TABLE_PATH = ["mcp_servers", SERVER_ID] as const;
@@ -82,6 +82,35 @@ export class CodexHostAdapter extends BaseHostAdapter {
     try {
       const content = upsertTomlTable(input.currentContent ?? "", TABLE_PATH, canonical, ["command", "args"]);
       return { kind: "ok", path, content, warnings };
+    } catch (error) {
+      const code = error instanceof TomlEditError ? error.code : "config_unparseable";
+      return { kind: "conflict", conflict: conflict(path, code, error instanceof Error ? error.message : String(error)) };
+    }
+  }
+
+  planUpdate(input: McpPlanInput): McpUpdatePlanResult {
+    const path = this.resolveConfigPath(input.context, input.scope);
+    const warnings = this.trustWarnings(input.context, input.scope);
+    const parsed = this.entryFrom(input, path);
+    if (!parsed.ok) return { kind: "conflict", conflict: parsed.conflict };
+    const existing = parsed.entry;
+    if (!existing) return { kind: "absent", path };
+    const managed = classifyManagedEntry(existing, "command-args");
+    if (!managed) {
+      return {
+        kind: "conflict",
+        conflict: conflict(
+          path,
+          "mcp_entry_conflict",
+          `An existing mcp_servers.${SERVER_ID} entry at ${path} cannot be proven managed (unknown fields, env, or changed args); refusing to update it.`,
+        ),
+      };
+    }
+    const canonical = this.canonicalEntry(input.launch);
+    if (deepEqual(existing, canonical)) return { kind: "no-op", path, current: managed.current, warnings };
+    try {
+      const content = upsertTomlTable(input.currentContent ?? "", TABLE_PATH, canonical, ["command", "args"]);
+      return { kind: "update", path, content, current: managed.current, warnings };
     } catch (error) {
       const code = error instanceof TomlEditError ? error.code : "config_unparseable";
       return { kind: "conflict", conflict: conflict(path, code, error instanceof Error ? error.message : String(error)) };

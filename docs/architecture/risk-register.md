@@ -15,7 +15,7 @@
 | R6 | 根测试脚本使用错误相对路径 | 测试导入失败或 CI 假绿 | 历史（过渡布局）；旧测试导入 `../dist`，依赖 mcp 目录位置 | 已被选型 A 取代：根脚本先 build，再运行根 `tests/**/*.test.mjs`，测试通过 `../../dist/...` 导入；MCP smoke 从薄 `bin/` 启动；见 R37 | 修正脚本并重跑全矩阵 |
 | R7 | 删除旧 CLI 时遗漏旧 bin/命令/文档引用 | 新包仍暴露旧名称或文档误导 | 高；旧字符串分散在 CLI、Host adapter、README、Skill、tests、dist | 构建前后对源码/文档/打包内容做旧名称 allowlist 扫描；只允许有明确历史语境的文档引用 | 发布前整组修正；发布后只能发新版本 |
 | R8 | 旧包名或旧 Registry ID 残留到新 package/server metadata | Registry 验证失败或用户安装旧包 | 高；当前全部配置还是旧名 | 一致性脚本校验 package `name`、`mcpName`、server `name`、identifier、仓库链接 | 不发布；修复后重跑 schema 与 tarball 验收 |
-| R9 | `task_*` 改名后 Skill/reference 与 MCP schema 不一致 | Agent 调用失败或错误理解工具能力 | 中高；现有 Skill 精确绑定 `pi_*`/v0.1.1 | 工具契约测试与 Skill 静态契约共用 manifest/schema；禁止保留旧 alias | 回退尚未发布的整组更改；发布后新版本同步修复 |
+| R9 | `task_*` 改名后 Skill/reference 与 MCP schema 不一致 | Agent 调用失败或错误理解工具能力 | 中高；现有 Skill 精确绑定 `pi_*`/v0.1.0 | 工具契约测试与 Skill 静态契约共用 manifest/schema；禁止保留旧 alias | 回退尚未发布的整组更改；发布后新版本同步修复 |
 | R10 | 工具描述仍与 Delegation-First Skill 冲突 | 主 Agent 的委派选择不一致 | 已发现；现 MCP 描述保留“节省上下文/并行、trivial 留给 Supervisor”，Skill 允许所有已定义边界的原子任务 | CI 对统一策略短语/契约版本做静态检查；review MCP `instructions` 与工具 description | 合并前协调并修正描述；不靠 Skill 单方面覆盖 MCP 指引 |
 | R11 | npm tarball 未携带完整 Skill | 用户安装 MCP 后找不到 `pi-delegate` | 高；过渡期 `files` 曾以 `mcp/dist/**` 与 `mcp/README.md` 为主 | 选型 A 下根 package `files` 必须包含根 `dist/**`、薄 `bin/`、`skills/pi-delegate/**`、必要根文档、LICENSE 和 `server.json`；tarball 测试断言 `SKILL.md` 和 references 存在 | 发布前修复 `files`；已发布包另发新版本 |
 | R12 | Skill 安装器覆盖用户已有同名 Skill | 用户数据丢失 | 中高；已有同名目录可能由用户自行维护 | 相同内容幂等；不同内容默认拒绝；显式备份后替换；原子暂存；记录 manifest | 从备份恢复；检测到用户修改时停止，不覆盖 |
@@ -26,7 +26,7 @@
 | R17 | `dist/` 与源码不一致 | npm 发布旧 JS 或错误 source map | 中高；过渡期 `mcp/dist/` 存在但被忽略；选型 A 下由根 `dist/` 生成物取代 | 发布前从根 build/prepack 干净构建；CI 检查生成后 git 状态与入口；以 `prepack` 产物为准 | 删除临时生成物或重建；不手工修补发布 dist |
 | R18 | Node 最低版本声明仍停留在 `>=20` | 支持已 EOL Node，安全维护和依赖兼容风险 | 已知：Node 20 于 2026-04-30 EOL | 人工确认基线；建议至少 Node 22；CI 覆盖最低与当前支持线 | 以新版本更新 engines；不得宣称未经验证的版本支持 |
 | R19 | 缺少跨平台 CI | Windows/Mac/Linux 文件系统行为差异无法发现 | 已发现；无 GitHub Actions、无跨平台测试 | 增加 OS × Node 矩阵；配置和 skill 安装都用临时目录 | 发布阻断，直到关键矩阵通过 |
-| R20 | `server.json` 与根 package 版本不一致 | Registry 校验失败或 Registry 指向不同包代码 | 中；当前 server/package 版本同为 0.1.1，但无自动检查 | CI 验证 package version、`server.json.version`、`packages[].version` 完全相同且精确 | 发布前修正；npm 已发版则停 Registry 发布并发新版本 |
+| R20 | `server.json` 与根 package 版本不一致 | Registry 校验失败或 Registry 指向不同包代码 | 中；本次目标是首次公开发布 v0.1.0，需确保三处版本完全一致 | CI 验证 package version、`server.json.version`、`packages[].version` 完全相同且精确 | 发布前修正；npm 已发版则停 Registry 发布并发新版本 |
 | R21 | `mcpName` 未与 Registry server name 同步 | Registry npm ownership verification 失败 | 高；根包迁移会修改 package name，需同步 `mcpName` | CI 比较 `mcpName === server.json.name`；Registry validate | 不发布；修正 metadata |
 | R22 | npm 包或 Registry ID 查重不可达时被误判为空闲 | 名称冲突、注册失败，或不合规地擅自换名 | **阶段 1 已获得官方结果**：npm `view` 返回 E404，Registry 精确搜索返回 HTTP 200、count 0；E404/count 0 仍不等于预留 | 将当前结果仅作为“当前无发布/无记录”证据；发布前再次官方查询并要求明确结果 | 不发布、不回退旧名；若届时结果变化则停止并人工核实 |
 | R23 | 旧仓库退役时历史、tag、release、issue、PR 或关键提交信息备份不完整 | 无法追溯旧发布内容、讨论和来源 | 未来风险；旧仓库当前必须保留 | 最终阶段逐仓库导出 tags、releases、issues、PR、关键提交信息；逐项核对并验证备份可读 | 暂停删除；补齐并再次验证备份 |

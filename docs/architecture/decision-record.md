@@ -83,12 +83,13 @@ Pi TaskExec 是供主 Agent 调用的 MCP 调度、连接和执行控制层，�
 - `pi-task-exec add mcp`：为明确选择的 Host 和 scope 写入/更新 MCP 条目。
 - `pi-task-exec add skill`：安装 npm 包内的 `skills/pi-delegate/`。
 - `pi-task-exec setup`：预览并组合 MCP 与 Skill 安装。
+- `pi-task-exec update`：就地更新已安装的 MCP/Skill 组件（阶段 9C）；始终检查两个已安装组件且不提供组件选择覆盖（不接受 `--target`），只更新可证明受管的组件，不安装缺失组件。
 - `pi-task-exec doctor`：只读检查 Node、Pi、Git、Host 配置、Skill 文件和契约版本。
 - 建议增设 `pi-task-exec remove mcp|skill` 以支持显式卸载和回滚；这是新接口，不延续旧 `uninstall` 命令。
 - `pi-task-exec mcp serve` 是 MCP Registry 和所有 Host 配置使用的明确服务启动入口，必须单独实现并测试。
 - `pi-task-exec` 无参数时不得启动 MCP；应显示清晰帮助/错误并返回明确状态，不保留含糊的旧默认行为。
 
-旧 CLI 中可复用的是 Host 配置路径/格式适配思路、JSON/TOML 解析边界、原子文件替换、Pi/Git 检查思路及选择参数模型。必须重写产品命名、入口与参数路由、MCP server key、包名/启动命令、用户确认与计划预览、备份/恢复/冲突处理、Windows 路径与编码处理。必须删除旧 bin `pi-worker-mcp`，以及 `serve/setup/doctor/update/uninstall/version` 旧顶层命令面；需要的功能映射到新 `mcp serve`、`setup`、`doctor`、`add`、`remove` 和 `--version`。
+旧 CLI 中可复用的是 Host 配置路径/格式适配思路、JSON/TOML 解析边界、原子文件替换、Pi/Git 检查思路及选择参数模型。必须重写产品命名、入口与参数路由、MCP server key、包名/启动命令、用户确认与计划预览、备份/恢复/冲突处理、Windows 路径与编码处理。必须删除旧 bin `pi-worker-mcp`，以及 `serve/setup/doctor/update/uninstall/version` 旧顶层命令面；需要的功能映射到新 `mcp serve`、`setup`、`update`、`doctor`、`add`、`remove` 和 `--version`。
 
 所有写操作都应先展示文件清单、scope、冲突和备份策略；默认只处理用户明确选定的 Host，不静默写入所有 Host。支持 `--dry-run`。新命令不复用旧配置键 `pi-worker-mcp`。
 

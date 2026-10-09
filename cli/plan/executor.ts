@@ -21,7 +21,7 @@ import {
   type SkillCliPathInspection,
   type SkillsCliSpawn,
 } from "../installers/skills-cli.js";
-import type { SkillCliPlan } from "../installers/skill.js";
+import type { SkillCliPlan, SkillCliSafetyFinding } from "../installers/skill.js";
 
 export type ExecutionStatus = "dry-run" | "success" | "no-op" | "unsupported" | "conflict" | "cancelled" | "failed" | "partial";
 
@@ -86,6 +86,13 @@ export interface ExecutorOptions {
   /** Package root holding the bundled skills/pi-delegate reference bytes. */
   skillPackageRoot?: string;
   skillTimeoutMs?: number;
+  /**
+   * Combined-plan Skill preflight already asked the default-No replacement
+   * confirmation for this exact inspection signature. The Skill executor
+   * re-inspects and skips the duplicate prompt only when the findings are
+   * unchanged; any drift still blocks the spawn.
+   */
+  preconfirmedSkillSignature?: string;
 }
 
 function adaptersFor(adapters: readonly HostAdapter[], host: string | undefined): HostAdapter | undefined {
@@ -357,13 +364,21 @@ function inspectionSignature(inspection: SkillCliPathInspection): string {
 }
 
 /**
- * Execute the pinned Skills CLI after the same preflight/confirmation seam as
- * config writes. The CLI install is intentionally not treated as atomic: no
- * rollback is attempted and the caller is warned.
+ * Inspect every path the Skills CLI may touch and decide whether execution may
+ * continue. Root escape and any symlink/non-directory/lock-conflict finding is
+ * a hard conflict that `--yes` cannot override. An ordinary existing skill
+ * directory is allowed but flagged so the caller can require a default-No
+ * confirmation.
  */
-async function executeSkillCli(plan: InstallPlan, cli: SkillCliPlan, options: ExecutorOptions): Promise<ExecutionResult> {
-  const base: ExecutionResult = emptyResult("success");
+interface SkillTargetInspection {
+  ok: boolean;
+  error?: ExecutionError;
+  signature?: string;
+  replacement?: boolean;
+  findings?: SkillCliSafetyFinding[];
+}
 
+async function inspectSkillExecutionTargets(cli: SkillCliPlan, options: ExecutorOptions): Promise<SkillTargetInspection> {
   // The Skills CLI is a third-party process that writes outside the plan/executor
   // seam. Assert every target it may touch is inside the explicitly allowed
   // roots before any inspection, confirmation, or spawn. `assertPathWithinRoots`
@@ -373,22 +388,17 @@ async function executeSkillCli(plan: InstallPlan, cli: SkillCliPlan, options: Ex
     try {
       await assertPathWithinRoots(target, { roots: options.roots });
     } catch (error) {
-      if (error instanceof SafetyError) {
-        return { ...base, status: "conflict", errors: [{ code: error.code, message: error.message }] };
-      }
+      if (error instanceof SafetyError) return { ok: false, error: { code: error.code, message: error.message } };
       throw error;
     }
   }
 
   const skillsRoot = dirname(cli.installDir);
   const agentsDir = dirname(skillsRoot);
-  const inspect = (): Promise<SkillCliPathInspection> => inspectSkillCliPaths({ agentsDir, skillsRoot, installDir: cli.installDir, lockFile: cli.lockFile });
-  const inspection = await inspect();
+  const inspection = await inspectSkillCliPaths({ agentsDir, skillsRoot, installDir: cli.installDir, lockFile: cli.lockFile });
   if (inspection.fatal) {
-    return { ...base, status: "conflict", errors: [{ code: inspection.fatal.code, message: inspection.fatal.message }] };
+    return { ok: false, error: { code: inspection.fatal.code, message: inspection.fatal.message } };
   }
-  const initialSignature = inspectionSignature(inspection);
-
   // The plan's safety findings are conservative if paths changed since
   // planning; current findings below determine whether execution can continue.
   const findings = inspection.findings.length > 0 ? inspection.findings : cli.safety;
@@ -399,35 +409,64 @@ async function executeSkillCli(plan: InstallPlan, cli: SkillCliPlan, options: Ex
   const unsafe = findings.filter((item) => item.kind !== "existing-skill");
   if (unsafe.length > 0) {
     return {
-      ...base,
-      status: "conflict",
-      errors: [{
+      ok: false,
+      error: {
         code: "unsafe_skill_path",
         message: `Refusing to run the Skills CLI for unsafe target paths:\n${unsafe.map((item) => `  - ${item.path} (${item.kind})`).join("\n")}`,
-      }],
+      },
     };
   }
-  const replacement = findings.some((item) => item.kind === "existing-skill");
-  if (!options.yes || replacement) {
+  return {
+    ok: true,
+    signature: inspectionSignature(inspection),
+    replacement: findings.some((item) => item.kind === "existing-skill"),
+    findings,
+  };
+}
+
+function skillReplacementConfirmation(findings: readonly SkillCliSafetyFinding[]): SafetyConfirmation {
+  return {
+    reason: "skill-path-safety",
+    message: `The Skills CLI would replace existing skill directories:\n${findings.filter((item) => item.kind === "existing-skill").map((item) => `  - ${item.path} (existing-skill)`).join("\n")}`,
+  };
+}
+
+/**
+ * Execute the pinned Skills CLI after the same preflight/confirmation seam as
+ * config writes. The CLI install is intentionally not treated as atomic: no
+ * rollback is attempted and the caller is warned.
+ */
+async function executeSkillCli(plan: InstallPlan, cli: SkillCliPlan, options: ExecutorOptions): Promise<ExecutionResult> {
+  const base: ExecutionResult = emptyResult("success");
+
+  const pre = await inspectSkillExecutionTargets(cli, options);
+  if (!pre.ok) {
+    return { ...base, status: "conflict", errors: [pre.error as ExecutionError] };
+  }
+  const initialSignature = pre.signature as string;
+  const replacement = pre.replacement === true;
+
+  // A combined plan asks the replacement confirmation before any MCP write and
+  // passes the inspected signature here. Re-ask only when the signature does
+  // not match (including when `--yes` was requested but a replacement needs an
+  // explicit default-No answer).
+  const preconfirmed = options.preconfirmedSkillSignature !== undefined && options.preconfirmedSkillSignature === initialSignature;
+  if (!preconfirmed && (!options.yes || replacement)) {
     if (!options.confirm) return { ...base, status: "cancelled" };
-    const safety: SafetyConfirmation | undefined = replacement
-      ? {
-          reason: "skill-path-safety",
-          message: `The Skills CLI would replace existing skill directories:\n${findings.filter((item) => item.kind === "existing-skill").map((item) => `  - ${item.path} (existing-skill)`).join("\n")}`,
-        }
-      : undefined;
+    const safety = replacement ? skillReplacementConfirmation(pre.findings ?? []) : undefined;
     const confirmed = await options.confirm(plan, safety);
     if (!confirmed) return { ...base, status: "cancelled" };
   }
 
-  // Re-inspect immediately after confirmation. A target created, removed, or
-  // swapped during the prompt changes the safety findings; refuse to run the
-  // CLI so no third-party process can act on a drifted path.
-  const afterConfirmation = await inspect();
-  if (afterConfirmation.fatal) {
-    return { ...base, status: "conflict", errors: [{ code: afterConfirmation.fatal.code, message: afterConfirmation.fatal.message }] };
+  // Re-inspect immediately before the third-party spawn. A target created,
+  // removed, or swapped while the prompt (or an MCP write in a combined plan)
+  // was in progress changes the safety findings; refuse to run the CLI so no
+  // third-party process can act on a drifted path.
+  const afterConfirmation = await inspectSkillExecutionTargets(cli, options);
+  if (!afterConfirmation.ok) {
+    return { ...base, status: "conflict", errors: [afterConfirmation.error as ExecutionError] };
   }
-  if (inspectionSignature(afterConfirmation) !== initialSignature) {
+  if (afterConfirmation.signature !== initialSignature) {
     return {
       ...base,
       status: "conflict",
@@ -604,23 +643,58 @@ export async function executePlan(plan: InstallPlan, options: ExecutorOptions): 
   // preserve partial success. This runs even when MCP has no writes (already
   // configured) so the MCP no-op is reported next to the Skill outcome and a
   // failed Skill cannot hide the actual MCP state. The plan is confirmed once
-  // here; the two parts then run without a second plan prompt. The Skills CLI
-  // path-safety confirmation still fires on its own and `--yes` still cannot
-  // bypass it.
-  if (plan.target === "both" && skillCli) {
-    if (!options.yes) {
+  // here; the two parts then run without a second plan prompt. An `update`
+  // plan always reports both components so every installed/absent permutation
+  // is visible.
+  if (plan.target === "both" && (skillCli !== undefined || plan.operation === "update")) {
+    const hasMutation = hasConfigWrites || skillCli !== undefined;
+    // A plan with no mutations (both components absent or already at target)
+    // is a clear no-op. Never ask the operator to confirm a plan that writes
+    // nothing; the plan warnings point at `setup`.
+    if (hasMutation && !options.yes) {
       if (!options.confirm) return combineParts([partOf("mcp", emptyResult("cancelled")), partOf("skill", emptyResult("cancelled"))]);
       const confirmed = await options.confirm(plan);
       if (!confirmed) return combineParts([partOf("mcp", emptyResult("cancelled")), partOf("skill", emptyResult("cancelled"))]);
     }
-    const partOptions: ExecutorOptions = { ...options, yes: true };
+
+    // Inspect the Skill target and ask any replacement-safety confirmation
+    // before an MCP write can happen. `--yes` cannot bypass the default-No
+    // replacement prompt, and unsafe paths abort the whole plan with no MCP
+    // mutation.
+    let preconfirmedSkillSignature: string | undefined;
+    if (skillCli) {
+      const pre = await inspectSkillExecutionTargets(skillCli, options);
+      if (!pre.ok) {
+        const error = pre.error as ExecutionError;
+        const mcpPart = { ...emptyResult("no-op"), warnings: ["No MCP changes were applied because the Skill preflight failed."] };
+        const skillPart = { ...emptyResult("conflict"), errors: [error] };
+        return { ...emptyResult("conflict"), errors: [error], warnings: [...mcpPart.warnings], parts: [partOf("mcp", mcpPart), partOf("skill", skillPart)] };
+      }
+      preconfirmedSkillSignature = pre.signature;
+      if (pre.replacement) {
+        if (!options.confirm) return combineParts([partOf("mcp", emptyResult("cancelled")), partOf("skill", emptyResult("cancelled"))]);
+        const confirmed = await options.confirm(plan, skillReplacementConfirmation(pre.findings ?? []));
+        if (!confirmed) return combineParts([partOf("mcp", emptyResult("cancelled")), partOf("skill", emptyResult("cancelled"))]);
+      }
+    }
+
+    const partOptions: ExecutorOptions = {
+      ...options,
+      yes: true,
+      ...(preconfirmedSkillSignature !== undefined ? { preconfirmedSkillSignature } : {}),
+    };
     const configResult =
       mcpUnsupported.length > 0
         ? unsupportedResult(mcpUnsupported)
         : hasConfigWrites
           ? await executeConfigWrites(plan, partOptions)
           : { ...emptyResult("no-op"), warnings: ["No MCP changes were planned."] };
-    const skillResult = skillUnsupported.length > 0 ? unsupportedResult(skillUnsupported) : await executeSkillCli(plan, skillCli, partOptions);
+    const skillResult =
+      skillUnsupported.length > 0
+        ? unsupportedResult(skillUnsupported)
+        : skillCli
+          ? await executeSkillCli(plan, skillCli, partOptions)
+          : { ...emptyResult("no-op"), warnings: ["No Skill changes were planned."] };
     return combineParts([partOf("mcp", configResult), partOf("skill", skillResult)]);
   }
 

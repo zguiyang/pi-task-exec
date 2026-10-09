@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { lstat, readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve, win32 as pathWin32 } from "node:path";
 import type { HostId } from "../hosts/adapters.js";
-import type { Scope } from "../plan/model.js";
+import type { PlanConflict, Scope } from "../plan/model.js";
 import { SKILL_NAME } from "../identity.js";
 import type {
   SkillCliPlan,
@@ -12,6 +12,7 @@ import type {
   SkillInstaller,
   SkillPlanRequest,
   SkillPlanResult,
+  SkillUpdateDiscovery,
 } from "./skill.js";
 
 /** Single pinned Skills CLI release. The version is never derived from a range. */
@@ -450,8 +451,156 @@ export async function verifySkillsCliInstall(input: SkillCliVerificationInput): 
 }
 
 /**
+ * Read the `pi-delegate` record from a Skills CLI lockfile without mutating
+ * anything. A missing lockfile is reported as an absent record; a symlinked or
+ * non-regular lockfile cannot be safely followed and is an error, as is an
+ * unreadable or malformed lockfile, so ownership cannot be misread.
+ */
+export async function readSkillLockRecord(
+  lockFile: string,
+): Promise<{ ok: true; record: { present: boolean; source?: string; ref?: string } } | { ok: false; message: string }> {
+  let info: Awaited<ReturnType<typeof lstat>>;
+  try {
+    info = await lstat(lockFile);
+  } catch (error) {
+    const errno = error as NodeJS.ErrnoException;
+    if (errno.code === "ENOENT") return { ok: true, record: { present: false } };
+    return { ok: false, message: `Cannot inspect the skill lockfile at ${lockFile}: ${errno.message}` };
+  }
+  if (info.isSymbolicLink()) {
+    return { ok: false, message: `The skill lockfile at ${lockFile} is a symlink; refusing to follow it.` };
+  }
+  if (!info.isFile()) {
+    return { ok: false, message: `The skill lockfile at ${lockFile} is not a regular file; ownership cannot be verified.` };
+  }
+  let raw: string;
+  try {
+    raw = await readFile(lockFile, "utf8");
+  } catch (error) {
+    const errno = error as NodeJS.ErrnoException;
+    if (errno.code === "ENOENT") return { ok: true, record: { present: false } };
+    return { ok: false, message: `Cannot read the skill lockfile at ${lockFile}: ${errno.message}` };
+  }
+  try {
+    const parsed = JSON.parse(raw) as { skills?: Record<string, { source?: unknown; ref?: unknown }> };
+    const record = parsed.skills?.[SKILL_NAME];
+    if (!record || typeof record !== "object") return { ok: true, record: { present: false } };
+    return {
+      ok: true,
+      record: {
+        present: true,
+        ...(typeof record.source === "string" ? { source: record.source } : {}),
+        ...(typeof record.ref === "string" ? { ref: record.ref } : {}),
+      },
+    };
+  } catch {
+    return { ok: false, message: `The skill lockfile at ${lockFile} is not valid JSON; ownership cannot be verified.` };
+  }
+}
+
+export type SkillUpdateDetection =
+  | { kind: "ok"; selection: SkillUpdateDiscovery }
+  | { kind: "conflict"; conflict: PlanConflict };
+
+/**
+ * Detect an installed skill for `update`. It requires both the expected skill
+ * directory and a lock record whose source is the fixed repository with a
+ * current ref. Every other combination is a conflict: an unknown owner, a
+ * missing lock, a lock without an install, or an unreadable path. Only when
+ * both are absent is the component treated as not installed.
+ */
+export async function detectSkillUpdate(input: {
+  installDir: string;
+  lockFile: string;
+  expectedSource: string;
+  desiredRef: string;
+}): Promise<SkillUpdateDetection> {
+  const installState = await classify(input.installDir);
+  if (installState.error) {
+    return {
+      kind: "conflict",
+      conflict: {
+        code: "skill_path_unreadable",
+        path: input.installDir,
+        message: `Cannot inspect the installed skill path ${input.installDir}: ${installState.error.message}`,
+      },
+    };
+  }
+  if (installState.kind === "symlink") {
+    return {
+      kind: "conflict",
+      conflict: {
+        code: "skill_path_symlink",
+        path: input.installDir,
+        message: `The installed skill path ${input.installDir} is a symlink; refusing to follow or replace it.`,
+      },
+    };
+  }
+  if (installState.kind !== "missing" && installState.kind !== "dir") {
+    return {
+      kind: "conflict",
+      conflict: {
+        code: "skill_path_not_directory",
+        path: input.installDir,
+        message: `The installed skill path ${input.installDir} exists but is not a directory; refusing to replace it.`,
+      },
+    };
+  }
+  const lock = await readSkillLockRecord(input.lockFile);
+  if (!lock.ok) {
+    return { kind: "conflict", conflict: { code: "skill_lock_unreadable", path: input.lockFile, message: lock.message } };
+  }
+  const record = lock.record;
+  const installPresent = installState.kind !== "missing";
+  const base = { installDir: input.installDir, lockFile: input.lockFile, desiredRef: input.desiredRef };
+  if (!installPresent && !record.present) return { kind: "ok", selection: { state: "absent", ...base } };
+  if (!installPresent && record.present) {
+    return {
+      kind: "conflict",
+      conflict: {
+        code: "skill_install_missing",
+        path: input.installDir,
+        message: `The lockfile records pi-delegate but ${input.installDir} does not exist; ownership is inconsistent.`,
+      },
+    };
+  }
+  if (installPresent && !record.present) {
+    return {
+      kind: "conflict",
+      conflict: {
+        code: "skill_lock_missing",
+        path: input.lockFile,
+        message: `A skill directory exists at ${input.installDir} but the lockfile does not record pi-delegate; ownership cannot be proven.`,
+      },
+    };
+  }
+  if (record.source !== input.expectedSource) {
+    return {
+      kind: "conflict",
+      conflict: {
+        code: "skill_ownership_conflict",
+        path: input.lockFile,
+        message: `The lockfile records source "${record.source ?? "unknown"}" instead of ${input.expectedSource}; refusing to replace a skill owned by another source.`,
+      },
+    };
+  }
+  if (typeof record.ref !== "string" || record.ref === "") {
+    return {
+      kind: "conflict",
+      conflict: {
+        code: "skill_ref_unknown",
+        path: input.lockFile,
+        message: `The lockfile does not record a current ref for pi-delegate; ownership cannot be proven.`,
+      },
+    };
+  }
+  if (record.ref === input.desiredRef) return { kind: "ok", selection: { state: "no-op", currentRef: record.ref, ...base } };
+  return { kind: "ok", selection: { state: "update", currentRef: record.ref, ...base } };
+}
+
+/**
  * Installer seam implementation backed by the pinned Vercel Skills CLI. It
- * only plans for `add skill`; `setup` and `remove skill` remain deferred. Plan
+ * plans `add skill`, the unified `update`, and an agent-selected `setup`. Plan
  * generation is side-effect-free: it inspects paths and resolves argv but
  * never runs npm, the network, or writes a lockfile.
  */
@@ -470,9 +619,13 @@ export class SkillsCliInstaller implements SkillInstaller {
   }
 
   async plan(request: SkillPlanRequest): Promise<SkillPlanResult> {
-    // `add skill` and an agent-selected unified `setup` install. A skill-only
-    // `setup` without an explicit agent (and `remove skill`) stay deferred.
-    const installable = request.operation === "add" || (request.operation === "setup" && request.host !== undefined);
+    // `add skill`, the unified `update`, and an agent-selected unified `setup`
+    // install. A skill-only `setup` without an explicit agent (and
+    // `remove skill`) stay deferred.
+    const installable =
+      request.operation === "add" ||
+      request.operation === "update" ||
+      (request.operation === "setup" && request.host !== undefined);
     if (!installable) {
       return {
         kind: "unsupported",
@@ -480,7 +633,7 @@ export class SkillsCliInstaller implements SkillInstaller {
           code: "skill_installer_deferred",
           target: "skill",
           scope: request.scope,
-          message: `The Skills CLI installer is implemented for \`add skill\` and an agent-selected unified \`setup\`; \`${request.operation}\` skill is deferred.`,
+          message: `The Skills CLI installer is implemented for \`add skill\`, \`update\`, and an agent-selected unified \`setup\`; \`${request.operation}\` skill is deferred.`,
         },
       };
     }
@@ -533,6 +686,100 @@ export class SkillsCliInstaller implements SkillInstaller {
     });
     const paths = skillCliTargetPaths({ scope: request.scope, cwd: request.context.cwd, home: request.context.home, env: request.context.env });
     const inspection = await inspectSkillCliPaths(paths);
+    const pathWarnings = inspection.findings.map((item) => ({
+      code: `skill_path_${item.kind.replace(/-/g, "_")}`,
+      message: item.message,
+    }));
+
+    if (request.operation === "update") {
+      if (inspection.fatal) {
+        return {
+          kind: "ok",
+          plan: {
+            directory: paths.installDir,
+            writes: [],
+            removals: [],
+            conflicts: [{ code: inspection.fatal.code, path: paths.installDir, message: inspection.fatal.message }],
+            warnings: pathWarnings,
+          },
+        };
+      }
+      // A symlinked/non-directory ancestor, install path, or lock path, and a
+      // non-regular lock path, are unsafe for the third-party CLI. They are
+      // conflicts before any read or spawn so they can never be mistaken for
+      // an absent or already-current no-op.
+      const unsafeFindings = inspection.findings.filter((item) => item.kind !== "existing-skill");
+      if (unsafeFindings.length > 0) {
+        return {
+          kind: "ok",
+          plan: {
+            directory: paths.installDir,
+            writes: [],
+            removals: [],
+            conflicts: unsafeFindings.map((item) => ({
+              code: `skill_path_${item.kind.replace(/-/g, "_")}`,
+              path: item.path,
+              message: item.message,
+            })),
+            warnings: pathWarnings,
+          },
+        };
+      }
+      const detection = await detectSkillUpdate({
+        installDir: paths.installDir,
+        lockFile: paths.lockFile,
+        expectedSource: SKILL_EXPECTED_SOURCE,
+        desiredRef: selected.ref,
+      });
+      if (detection.kind === "conflict") {
+        return {
+          kind: "ok",
+          plan: { directory: paths.installDir, writes: [], removals: [], conflicts: [detection.conflict], warnings: pathWarnings },
+        };
+      }
+      const discovery = detection.selection;
+      if (discovery.state === "absent") {
+        return {
+          kind: "ok",
+          plan: {
+            directory: paths.installDir,
+            writes: [],
+            removals: [],
+            conflicts: [],
+            warnings: [
+              ...pathWarnings,
+              {
+                code: "skill_not_installed",
+                message: `The pi-delegate skill is not installed at ${paths.installDir} and the lockfile does not record it; run pi-task-exec setup to install it.`,
+              },
+            ],
+            update: discovery,
+          },
+        };
+      }
+      if (discovery.state === "no-op") {
+        return {
+          kind: "ok",
+          plan: {
+            directory: paths.installDir,
+            writes: [],
+            removals: [],
+            conflicts: [],
+            warnings: [
+              ...pathWarnings,
+              { code: "skill_already_up_to_date", message: `pi-delegate is already at ${selected.ref} at ${paths.installDir}; the Skills CLI is not invoked.` },
+            ],
+            update: discovery,
+          },
+        };
+      }
+      const cli = this.describeCli(request, agent, selected, launch, paths, inspection.findings, discovery.currentRef);
+      return {
+        kind: "ok",
+        plan: { directory: paths.installDir, writes: [], removals: [], conflicts: [], warnings: pathWarnings, cli, update: discovery },
+      };
+    }
+
     if (inspection.fatal) {
       return {
         kind: "ok",
@@ -548,13 +795,9 @@ export class SkillsCliInstaller implements SkillInstaller {
     }
 
     const cli = this.describeCli(request, agent, selected, launch, paths, inspection.findings);
-    const warnings = inspection.findings.map((item) => ({
-      code: `skill_path_${item.kind.replace(/-/g, "_")}`,
-      message: item.message,
-    }));
     return {
       kind: "ok",
-      plan: { directory: paths.installDir, writes: [], removals: [], conflicts: [], warnings, cli },
+      plan: { directory: paths.installDir, writes: [], removals: [], conflicts: [], warnings: pathWarnings, cli },
     };
   }
 
@@ -565,6 +808,7 @@ export class SkillsCliInstaller implements SkillInstaller {
     launch: SkillsCliLaunch,
     paths: ReturnType<typeof skillCliTargetPaths>,
     safety: SkillCliSafetyFinding[],
+    currentRef?: string,
   ): SkillCliPlan {
     return {
       installer: "skills-cli",
@@ -586,6 +830,7 @@ export class SkillsCliInstaller implements SkillInstaller {
       lockFile: paths.lockFile,
       expectedSource: SKILL_EXPECTED_SOURCE,
       expectedRef: selected.ref,
+      ...(currentRef !== undefined ? { currentRef } : {}),
       safety,
       lossWarning: safety.length > 0,
     };

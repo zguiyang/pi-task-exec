@@ -13,10 +13,11 @@ import {
   type LaunchMode,
   type PlanOperation,
   type PlanTarget,
+  type ReleaseTagPreflight,
   type Scope,
 } from "../plan/model.js";
 import type { SkillInstaller } from "../installers/skill.js";
-import { skillCliAdditionalRoots, type SkillsCliSpawn } from "../installers/skills-cli.js";
+import { SKILL_REPOSITORY, skillCliAdditionalRoots, type SkillsCliSpawn } from "../installers/skills-cli.js";
 import type { Interaction, InteractionChoice } from "../interactive.js";
 import { executePlan, formatExecution, serializeExecution, type SafetyConfirmation } from "../plan/executor.js";
 
@@ -68,6 +69,8 @@ export interface CliDeps {
   skillSpawn?: SkillsCliSpawn;
   now: () => Date;
   spawn: SpawnFunction;
+  /** Injectable read-only exact release-tag preflight; defaults to `git ls-remote`. */
+  releaseTagPreflight?: ReleaseTagPreflight;
   confirm?: (plan: import("../plan/model.js").InstallPlan, safety?: SafetyConfirmation) => Promise<boolean>;
   roots?: readonly string[];
   backupDir?: string;
@@ -85,6 +88,7 @@ Commands:
   ${PRODUCT_NAME} remove mcp         Plan/remove the MCP entry for an explicit host and scope
   ${PRODUCT_NAME} remove skill       Plan/remove the pi-delegate skill for an explicit scope
   ${PRODUCT_NAME} setup              Plan combined MCP and/or skill setup
+  ${PRODUCT_NAME} update             Plan an in-place update of already-installed MCP and/or Skill components
   ${PRODUCT_NAME} doctor             Read-only environment, host, skill, and version check
 
 Options:
@@ -97,7 +101,7 @@ Options:
   --interactive, -i                  Force prompting for missing selections (requires a TTY)
   --host <${KNOWN_HOST_IDS.join("|")}>
   --scope <project|global>
-  --target <mcp|skill|both>          (setup only)
+  --target <mcp|skill|both>          (setup only; update always inspects both)
 
 Hosts: ${KNOWN_HOST_IDS.join(", ")}. Scopes: project, global.
 No arguments prints this help and never starts MCP.
@@ -117,6 +121,8 @@ function commandHelp(topic: string): string {
       return `Usage:\n  ${PRODUCT_NAME} remove skill --scope <project|global> [--dry-run] [--json] [--yes]\n\nPlan and (when available) remove the managed pi-delegate skill.`;
     case "setup":
       return `Usage:\n  ${PRODUCT_NAME} setup [--target <mcp|skill|both>] [--host <${KNOWN_HOST_IDS.join("|")}>] [--scope <project|global>] [--dry-run] [--json] [--yes]\n\nPlan the unified MCP + Skill setup in one plan (--target is an explicit override). On a TTY a missing Agent/Scope is prompted; --json fails instead of prompting. The MCP write and Skills CLI install run independently and report partial success.`;
+    case "update":
+      return `Usage:\n  ${PRODUCT_NAME} update [--host <${KNOWN_HOST_IDS.join("|")}>] [--scope <project|global>] [--dry-run] [--json] [--yes]\n\nAlways inspect both installed components (MCP and Skill); there is no component-selection override. Only a provably managed MCP entry and a lockfile-owned Skill are updated; absent components are never installed and point you at setup. On a TTY a missing Agent/Scope is prompted; --json fails instead of prompting. In release mode the exact v<packageVersion> GitHub tag is preflighted before a Skill update and before any MCP write in the same plan.`;
     case "doctor":
       return `Usage:\n  ${PRODUCT_NAME} doctor [--json]\n\nRead-only check of Node, Pi, Git, package/platform/version contract, host adapter capability, and skill target status. Never prints config secrets or file contents.`;
     default:
@@ -280,6 +286,26 @@ export function parseCli(args: string[], parseOptions: ParseOptions = {}): Parse
     }
     return { kind: "command", operation: "setup", target: effectiveTarget, options };
   }
+  if (first === "update") {
+    if (second !== undefined) return unknown();
+    // Unified in-place update always inspects both installed components.
+    // Component selection is intentionally not offered.
+    if (options.target !== undefined) {
+      return errorResult(
+        "unexpected_option",
+        "update does not accept --target; it always inspects both MCP and Skill. Use setup --target <mcp|skill|both> to select components.",
+        options.json,
+      );
+    }
+    const effectiveTarget: PlanTarget = "both";
+    if (!interactive) {
+      if (options.host === undefined) {
+        return errorResult("missing_host", `update requires an explicit --host ${KNOWN_HOST_IDS.join("|")}.`, options.json);
+      }
+      if (options.scope === undefined) return errorResult("missing_scope", "update requires an explicit --scope project|global.", options.json);
+    }
+    return { kind: "command", operation: "update", target: effectiveTarget, options };
+  }
   if (first === "doctor") {
     if (second !== undefined) return unknown();
     if (options.target !== undefined) return errorResult("unexpected_option", "--target is only valid for setup.", options.json);
@@ -303,16 +329,38 @@ function printError(io: CliIo, code: string, message: string, json: boolean): vo
   }
 }
 
+/**
+ * Default read-only release-tag preflight: an exact `git ls-remote` lookup of
+ * `refs/tags/<tag>` against the fixed GitHub repository. It never queries npm
+ * and never fetches or mutates anything.
+ */
+function defaultReleaseTagPreflight(spawn: SpawnFunction, env: NodeJS.ProcessEnv): ReleaseTagPreflight {
+  return async (tag) => {
+    const result = await spawn("git", ["ls-remote", SKILL_REPOSITORY, `refs/tags/${tag}`], { timeoutMs: 15_000, env });
+    if (result.error) return { ok: false, message: `Release tag preflight could not run: ${result.error}` };
+    if (result.code !== 0) return { ok: false, message: `Release tag preflight exited with code ${result.code ?? "unknown"}.` };
+    const refs = result.stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim().split(/\s+/)[1])
+      .filter((ref): ref is string => typeof ref === "string" && ref.length > 0);
+    return refs.includes(`refs/tags/${tag}`)
+      ? { ok: true }
+      : { ok: false, message: `The exact release tag refs/tags/${tag} was not found on GitHub; refusing to update and never falling back to main.` };
+  };
+}
+
 function ensureDeps(deps: Partial<CliDeps> | undefined): CliDeps {
   if (!deps || !deps.io || !deps.adapters || !deps.skillInstaller || !deps.spawn || !deps.now || !deps.packageRoot || !deps.packageVersion) {
     throw new Error("runCli requires fully specified dependencies (io, adapters, skillInstaller, spawn, now, packageRoot, packageVersion).");
   }
+  const env = deps.env ?? process.env;
   return {
     ...deps,
-    env: deps.env ?? process.env,
+    env,
     cwd: deps.cwd ?? process.cwd(),
     home: deps.home ?? "",
     platform: deps.platform ?? process.platform,
+    releaseTagPreflight: deps.releaseTagPreflight ?? defaultReleaseTagPreflight(deps.spawn, env),
   } as CliDeps;
 }
 
@@ -367,6 +415,7 @@ async function runCommand(parsed: Extract<ParsedCli, { kind: "command" }>, deps:
   const interaction = deps.interaction;
   const canPrompt = interaction !== undefined && !options.json;
   if (operation === "setup" && canPrompt) deps.io.stdout("Pi TaskExec Setup\n\n");
+  if (operation === "update" && canPrompt) deps.io.stdout("Pi TaskExec Update\n\n");
   const cancelled = (): CliAction => {
     deps.io.stdout("Cancelled: no changes were made.\n");
     return { kind: "exit", code: 0 };
@@ -376,11 +425,16 @@ async function runCommand(parsed: Extract<ParsedCli, { kind: "command" }>, deps:
     return { kind: "exit", code: 1 };
   };
 
-  // `setup` is always unified MCP + Skill; only Agent/Scope are prompted.
+  // `setup` is always unified MCP + Skill; `update` discovers both installed
+  // components by default. Only Agent/Scope are prompted.
   const target = parsedTarget;
   let host = options.host;
   let scope = options.scope;
-  const hostRequired = operation === "add" || (operation === "setup" && target !== "skill") || (operation === "remove" && target === "mcp");
+  const hostRequired =
+    operation === "add" ||
+    operation === "update" ||
+    (operation === "setup" && target !== "skill") ||
+    (operation === "remove" && target === "mcp");
   const hostPromptable = hostRequired || operation === "setup";
   if (host === undefined && hostPromptable) {
     if (canPrompt) {
@@ -397,8 +451,8 @@ async function runCommand(parsed: Extract<ParsedCli, { kind: "command" }>, deps:
     }
   }
 
-  // A unified `setup` keeps its `setup` operation; the installer accepts
-  // `setup` when an agent is present and stays deferred otherwise.
+  // A unified `setup`/`update` keeps its operation; the installer accepts
+  // `setup` when an agent is present and `update` for managed replacement.
   const planOperation: PlanOperation = operation;
   if (scope === undefined) {
     if (!canPrompt) {
@@ -434,6 +488,7 @@ async function runCommand(parsed: Extract<ParsedCli, { kind: "command" }>, deps:
       launch,
       launchMode,
       localDev: options.localDev,
+      ...(deps.releaseTagPreflight !== undefined ? { releaseTagPreflight: deps.releaseTagPreflight } : {}),
     },
   );
 

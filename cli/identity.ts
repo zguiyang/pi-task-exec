@@ -7,4 +7,4 @@ export const PACKAGE_NAME = "@zguiyang/pi-task-exec";
 export const SERVER_ID = "pi-task-exec";
 export const SERVER_NAME = "io.github.zguiyang/pi-task-exec";
 export const SKILL_NAME = "pi-delegate";
-export const VERSION = "0.1.1";
+export const VERSION = "0.1.0";

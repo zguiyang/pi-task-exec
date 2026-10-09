@@ -1,26 +1,31 @@
-# Pi TaskExec MCP contract (v0.1.1)
+# Pi TaskExec MCP contract (v0.1.0)
 
 This reference describes the public interface of
-[`@zguiyang/pi-task-exec` v0.1.1](https://github.com/zguiyang/pi-task-exec/tree/v0.1.1).
+[`@zguiyang/pi-task-exec` v0.1.0](https://github.com/zguiyang/pi-task-exec/tree/v0.1.0).
 It is deliberately a delegation aid, not a second implementation of the
 runtime.
 
 ## Dependency and installation
 
-Install and configure the MCP for the chosen Host and scope first. The
-`pi-task-exec add mcp` and `setup` installers are planned for a future stage and
-are not implemented in this build. Until then, register the MCP with the Host
-using the stdio launch contract:
+Run the unified setup flow for the chosen Agent and scope to install both the
+MCP and this Skill:
+
+```text
+npx -y @zguiyang/pi-task-exec@0.1.0 setup
+```
+
+For a direct Host configuration, the stdio launch contract is:
 
 ```text
 command: npx
-args:    -y @zguiyang/pi-task-exec@0.1.1 mcp serve
+args:    -y @zguiyang/pi-task-exec@0.1.0 mcp serve
 ```
 
 The Host starts the MCP. Do not run this launch command from the Skill. The
-runtime needs Node.js 20+, a configured local `pi` executable, and Git for
-`worktree` mode. Skill and MCP are independent repositories; installing this
-Skill does not install or configure the MCP.
+runtime needs Node.js >=22.20.0, a configured local `pi` executable, and Git
+for `worktree` mode. The Skill and MCP contract are maintained together in
+`zguiyang/pi-task-exec`; installing the Skill by itself does not configure the
+MCP.
 
 ## Delegation policy
 

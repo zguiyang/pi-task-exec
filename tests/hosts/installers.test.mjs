@@ -154,7 +154,7 @@ test("Codex project install targets cwd/.codex/config.toml and warns about proje
   const toml = await readFile(path, "utf8");
   assert.match(toml, /\[mcp_servers\.pi-task-exec\]/);
   assert.match(toml, /command = "npx"/);
-  assert.match(toml, /args = \["-y", "@zguiyang\/pi-task-exec@0\.1\.1", "mcp", "serve"\]/);
+  assert.match(toml, /args = \["-y", "@zguiyang\/pi-task-exec@0\.1\.0", "mcp", "serve"\]/);
   assert.ok(blocks[0].warnings.some((warning) => warning.code === "project_trust_required"));
   assert.match(stdout, /trust/);
 });
@@ -205,7 +205,7 @@ test("Codex install is exact-content idempotent and refuses an old-version entry
 
   const path = join(root, "home", ".codex", "config.toml");
   const before = await readFile(path, "utf8");
-  await writeFile(path, before.replace(/@0\.1\.1/, "@0.0.9"));
+  await writeFile(path, before.replace(/@0\.1\.0/, "@0.0.9"));
   const third = await run(root, ["add", "mcp", "--host", "codex", "--scope", "global", "--yes", "--json"]);
   assert.deepEqual(third.action, { kind: "exit", code: 1 });
   assert.equal(third.blocks[0].conflicts[0].code, "mcp_entry_conflict");
@@ -224,7 +224,7 @@ test("Codex removal removes only the managed entry and preserves everything else
     "",
     "[mcp_servers.pi-task-exec]",
     'command = "npx"',
-    'args = ["-y", "@zguiyang/pi-task-exec@0.1.1", "mcp", "serve"]',
+    'args = ["-y", "@zguiyang/pi-task-exec@0.1.0", "mcp", "serve"]',
     "",
     "[history]",
     'persistence = "save-all"',

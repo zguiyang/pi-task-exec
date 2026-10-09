@@ -19,10 +19,15 @@ neither is an operating-system security sandbox.
 > Status: Phases 6–8 and the 2026-10-09 root-level directory refactor (layout
 > A: root `cli/`, `mcp/`, `skills/`, `tests/`, `docs/`, and root `dist/`) are
 > implemented in this checkout. Stage 8 adds real Codex, Zed, and OpenCode MCP
-> install/remove with safe TOML/JSONC merging, backups, and managed-entry
+> implement/remove with safe TOML/JSONC merging, backups, and managed-entry
 > removal. Stage 9A adds `add skill`: it installs `pi-delegate` through the
-> pinned Vercel Skills CLI v1.7.1 from the fixed GitHub source. The combined
-> `setup`/`update` flows and `remove skill` remain deferred. Stage 10
+> pinned Vercel Skills CLI v1.7.1 from the fixed GitHub source. Stage 9B adds
+> the interactive unified `setup`. The Stage 9A+9B baseline is committed as
+> `a8b77e9`, and the isolated real Setup Smoke for 09B passed and was cleaned
+> up. Stage 9C adds the unified in-place `update` for already-installed
+> components; it is still uncommitted and awaits Supervisor review, and no real
+> 09C update installation has been verified. `remove skill` remains deferred.
+> Stage 10
 > (MCP/Skill contract synchronization and tool renaming) has not started. The
 > npm package and MCP Registry entry have not been published. Local tarball
 > prepack, archive-content checks, and a separate clean npm prefix installation
@@ -44,7 +49,7 @@ the MCP Registry entry. All six MCP tools (`pi_spawn`, `pi_status`,
 | --- | --- |
 | `pi-task-exec` (no arguments) | Prints help and exits `0`; never starts MCP. |
 | `pi-task-exec --help` | Prints help and exits `0`; never starts MCP. |
-| `pi-task-exec --version` | Prints only `0.1.1` and exits `0`; never starts MCP. |
+| `pi-task-exec --version` | Prints only `0.1.0` and exits `0`; never starts MCP. |
 | `pi-task-exec mcp serve` | Starts the existing MCP stdio runtime. |
 | `pi-task-exec doctor [--json]` | Read-only environment, host, skill, and version-contract check; never starts MCP. |
 | `pi-task-exec add mcp [--host <codex\|zed\|opencode>] [--scope <project\|global>] [--dry-run] [--json] [--yes]` | Plans and safely merges the host MCP entry (stage 8); never starts MCP. On a TTY, a missing `--host`/`--scope` is an arrow-key prompt; `--json` fails instead of prompting. |
@@ -52,9 +57,11 @@ the MCP Registry entry. All six MCP tools (`pi_spawn`, `pi_status`,
 | `pi-task-exec add skill [--host <codex\|zed\|opencode>] [--scope <project\|global>] [--dry-run] [--json] [--yes]` | Plans and installs the `pi-delegate` Skill through the pinned Vercel Skills CLI v1.7.1 from the fixed GitHub source; never starts MCP. On a TTY, a missing `--host`/`--scope` is an arrow-key prompt. |
 | `pi-task-exec remove skill --scope <project\|global>` | Plans skill removal through the installer seam; stage 9A leaves this deferred. |
 | `pi-task-exec setup [--target <mcp\|skill\|both>] [--host <...>] [--scope <...>]` | Plans the unified MCP + Skill setup in one plan by default. On a TTY, only missing Agent/Scope are arrow-key prompts; `--target` is an explicit non-interactive override. |
+| `pi-task-exec update [--host <...>] [--scope <...>] [--dry-run] [--json] [--yes]` | Plans in-place updates for both already-installed components; there is no component-selection override. Discovers only managed components; absent ones are never installed and point at `setup`. In release mode the exact `v<packageVersion>` GitHub tag is preflighted before a Skill update and before any MCP write in the same plan. |
 
 Only the explicit `mcp serve` route initializes and starts the MCP runtime.
-Ordinary `help`, `--version`, `add`, `remove`, `setup`, and `doctor` do not
+Ordinary `help`, `--version`, `add`, `remove`, `setup`, `update`, and `doctor`
+do not
 start MCP. Running `pi-task-exec` with no arguments prints help and does not
 start MCP.
 
@@ -65,25 +72,29 @@ and unsupported capabilities, then revalidates the plan immediately before
 executing. `--dry-run` prints the plan and exits without writing; `--json`
 emits stable, secret-free JSON and never prompts, so a missing selection is an
 error; `--yes` may skip confirmation only after the plan is printed. On a TTY,
-`add mcp`, `add skill`, and `setup` prompt for missing Agent/Scope with arrow
+`add mcp`, `add skill`, `setup`, and `update` prompt for missing Agent/Scope
+with arrow
 keys, then ask a default-No Yes/No confirmation; `setup` is always the unified
 MCP + Skill plan unless an explicit `--target` overrides it, and `--json` fails
 for missing Agent/Scope without prompting. The prompts are injectable and
 cancellation performs no writes. Any conflict blocks
 the whole operation, and `--host`/`--scope` remain mandatory for non-interactive
-MCP add/remove/setup.
+MCP add/remove/setup/update.
 
 A unified `setup` builds one plan containing both the MCP config write and the
 Skills CLI install. The two targets run independently and report their own
 status and errors: if one succeeds and the other fails, the result status is
-`partial` and the successful mutations are preserved.
+`partial` and the successful mutations are preserved. A unified `update`
+reuses the same plan/executor seam: it discovers whether each component is
+installed, plans only the components that need changing, and reports each as
+`success`, `no-op`, or `failed` without cross-component rollback.
 
 The current `pi_*` MCP tools remain in place; their migration to `task_*` is
 planned for stage 10. Stage 8 implements the Codex (TOML), Zed (JSONC), and
 OpenCode (JSONC) adapters. Stage 9A implements `add skill` through the pinned
 Vercel Skills CLI v1.7.1; `setup` now installs the Skill when an Agent is
-selected, while the `update` flow and `remove skill` remain deferred, so those
-operations report unsupported. Every real
+selected, and `update` updates an already-installed Skill in place, while
+`remove skill` remains deferred. Every real
 MCP write is path-boundary and symlink checked, writes through a same-directory
 temporary file with an atomic rename, backs up an existing config before an
 update, refuses malformed or conflicting config, and removes only an entry that
@@ -101,7 +112,7 @@ Zed Restricted Mode ignores `.zed/settings.json` MCP servers until the worktree
 is trusted; the installer does not grant either trust.
 
 Any unrecognized input, including the removed top-level `serve`, `version`,
-`update`, and `uninstall` routes and the unsupported `--all-hosts` flag,
+and `uninstall` routes and the unsupported `--all-hosts` flag,
 reports an error and exits `1`.
 
 ## Installation and launch contract
@@ -121,11 +132,11 @@ command: npx
 args:    -y @zguiyang/pi-task-exec@<version> mcp serve
 ```
 
-After version `0.1.1` is published, the same launch is:
+The v0.1.0 release launch is:
 
 ```text
 command: npx
-args:    -y @zguiyang/pi-task-exec@0.1.1 mcp serve
+args:    -y @zguiyang/pi-task-exec@0.1.0 mcp serve
 ```
 
 From this source checkout, build first and launch the compiled CLI directly:
@@ -222,6 +233,53 @@ source and ref. A CLI exit code of `0` with missing files or a missing/invalid
 lockfile is reported as a failure. The Skills CLI install is **not** a
 transaction; no rollback is claimed or attempted.
 
+## Unified update (stage 9C)
+
+`update` is an in-place update for components that are already installed; it
+never installs an absent component and it always inspects both MCP and Skill.
+There is no `--target`/component-selection override for `update`; only `setup`
+accepts `--target`. Missing Agent/Scope are prompted on a TTY and are required
+for `--json`/non-interactive runs.
+
+- **MCP discovery.** A config entry is updated only when it is an exact
+  canonical `pi-task-exec` managed entry whose sole difference is the pinned
+  npm package semver token (`npx -y @zguiyang/pi-task-exec@<version> mcp serve`)
+  or the absolute source-checkout launch (`node <path>/dist/cli/index.js mcp
+  serve`). An entry with any changed or unknown field, an `env`/`enabled`
+  block, a different package, a non-semver token, or changed args is a
+  conflict and is never rewritten. An absent entry is a no-op that points at
+  `pi-task-exec setup`.
+- **Skill discovery.** The expected install directory and a valid lock record
+  for `zguiyang/pi-task-exec` with a current ref are both required. An existing
+  directory without a lock, a lock without the directory, another source, or a
+  missing ref is a conflict; only when both are absent is the component treated
+  as not installed and pointed at `setup`. When the recorded ref already equals
+  the target, the result is a no-op and the Skills CLI is not invoked.
+- **Targets.** Release updates converge to the exact `v${packageVersion}`
+  GitHub tag; source-checkout updates converge to the existing fixed commit
+  `f914707fa22fd658f50e059a5091440796ef39e0`. Skill updates run
+  `skills add <pinned target ref> --agent ... --skill pi-delegate --copy
+  --json`; they never use `skills update`.
+- **Release tag preflight.** When (and only when) a release-mode Skill update
+  is planned, an injectable read-only exact `git ls-remote` check verifies
+  `refs/tags/v${packageVersion}` before any MCP write in the same combined plan.
+  A missing or unverifiable tag conflicts the entire plan, writes nothing, and
+  never falls back to `main`. An MCP-only update (Skill absent or already at
+  target) and a checkout-mode commit Skill update are never blocked by an
+  unrelated GitHub tag. There is no npm `latest` query.
+- **Preview and safety.** The plan preview shows the current and target
+  version/ref, the managed MCP config key and path, the Skill path, the
+  project/global (shared `.agents/skills`) scope, and that an existing Skill
+  replacement may lose local changes. A combined plan asks any existing-Skill
+  replacement confirmation (default-No, not bypassable by `--yes`) before it
+  writes MCP config, so a refusal leaves both components unchanged. Symlinked,
+  out-of-root, or non-directory targets are whole-plan conflicts with no MCP
+  mutation. A plan with no mutations is reported as a clear no-op that points
+  at `setup` and is never confirmed. `--dry-run` never writes or spawns (the
+  read-only tag check is allowed), and MCP/Skill parts run independently so a
+  partial result is reported accurately with a non-zero exit and no
+  cross-component rollback.
+
 ## Environment variables
 
 | Environment variable | Used by | Purpose |
@@ -311,8 +369,9 @@ Phases 6–8 and stage 9A are implemented in this checkout. The following are
 - the npm tarball has been generated locally, but the package has not been
   published and cannot currently be installed from npm; no MCP Registry record
   has been published;
-- stage 9A implements only `add skill`; the combined `setup`/`update` flows and
-  `remove skill` remain deferred and report unsupported;
+- stage 9A implements `add skill`, stage 9B implements the interactive
+  unified `setup`, and stage 9C implements the unified in-place `update`;
+  `remove skill` remains deferred and reports unsupported;
 - the Skills CLI install is not transactional and is not rolled back;
 - stage 10 tool migration has not started; the existing `pi_*` tools remain
   and migration to `task_*` is planned for that stage;
@@ -330,7 +389,7 @@ output all live under the root.
 | `bin/pi-task-exec.mjs` | Thin package launcher; only imports and calls `dist/cli/index.js`. No business implementation. |
 | `cli/` | CLI parser/router, commands, host install adapters (`cli/hosts/`), installer seam and the pinned Skills CLI installer (`cli/installers/`), plan model and safety executor (`cli/plan/`), and CLI identity/IO. |
 | `mcp/` | MCP server entry, tools, workers, Pi RPC, and runtime. Does not import the CLI. |
-| `skills/pi-delegate/` | The `pi-delegate` delegation-policy Skill and its `references/`. Maintained by JoeyZhao in the `agent-skills` project. |
+| `skills/pi-delegate/` | The sole maintained source of the `pi-delegate` Skill and its `references/`, coupled to this product's MCP contract. |
 | `tests/` | Unified tests under `tests/cli/`, `tests/mcp/`, `tests/hosts/`, and `tests/skills/`, with MCP fixtures under `tests/mcp/fixtures/`. |
 | `docs/architecture/` | Architecture decision record, implementation plan, and risk register for the migration. |
 | `docs/release-standard-baseline.md` | Release standard baseline and distribution contract. |
@@ -396,18 +455,20 @@ current product names and must not appear in runtime code, current installation
 instructions, or package metadata.
 
 - The MCP module was migrated from the `pi-worker-mcp` project.
-- The `pi-delegate` Skill is maintained by JoeyZhao in the `agent-skills`
-  project.
+- The `pi-delegate` Skill was migrated from `agent-skills`; its sole
+  maintenance source is now `skills/pi-delegate/` in this repository. The
+  general-purpose `agent-skills` repository and its unrelated Skills remain
+  independent and are retained.
 
 The repository previously used a migration-transition layout that kept all CLI,
 host-adapter, and MCP source and tests inside the MCP module and emitted build
 output there. The approved 2026-10-09 layout A replaces that with root `cli/`,
 `mcp/`, `tests/`, root `dist/`, and the thin `bin/pi-task-exec.mjs` launcher.
 
-**Both old projects remain.** The previous repositories and their local
-checkouts are not retired, renamed, or deleted. They are only to be retired as
-the final migration step, after the new project is published and publicly
-accepted, following the order and gates recorded in
+The `agent-skills` repository remains an actively maintained general-purpose
+Skills collection. Only the legacy `pi-worker-mcp` repository is eligible for
+retirement, after the new product is published and publicly accepted, following
+the order and gates recorded in
 [`docs/architecture/implementation-plan.md`](docs/architecture/implementation-plan.md).
 
 This repository does not use the old repositories' Git history; it was

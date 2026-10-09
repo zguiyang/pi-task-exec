@@ -1,9 +1,10 @@
 import { constants } from "node:fs";
 import { access, readFile } from "node:fs/promises";
 import { posix, win32 } from "node:path";
-import type { DoctorCheck, FileWriteOptions, HostAdapter, HostDoctorMetadata, HostId, HostTarget, McpEntryPlanResult, McpLaunchSpec, McpPlanInput, McpRemovalPlanResult } from "./adapters.js";
+import type { DoctorCheck, FileWriteOptions, HostAdapter, HostDoctorMetadata, HostId, HostTarget, McpEntryPlanResult, McpLaunchSpec, McpPlanInput, McpRemovalPlanResult, McpUpdatePlanResult } from "./adapters.js";
 import type { HostContext, PlanWarning, Scope, UnsupportedCapability } from "../plan/model.js";
 import { atomicWriteFile } from "../plan/safety.js";
+import { PACKAGE_NAME } from "../identity.js";
 
 export const ALL_PLATFORMS: readonly NodeJS.Platform[] = ["darwin", "linux", "win32"];
 
@@ -93,6 +94,72 @@ export function deepEqual(left: unknown, right: unknown): boolean {
   return false;
 }
 
+export type ManagedEntryFormat = "command-args" | "opencode";
+
+/** A provably managed launch found in a host config entry. */
+export interface ManagedLaunch {
+  mode: "npm" | "checkout";
+  /** The installed npm token (`@scope/name@semver`) or absolute checkout path. */
+  current: string;
+}
+
+// The exact package token this tool owns. A different package, a range, or
+// `latest` is not a managed entry and must conflict rather than be rewritten.
+const PACKAGE_TOKEN = new RegExp(
+  `^${PACKAGE_NAME.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}@\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$`,
+);
+
+function isManagedCheckoutLaunch(value: string): boolean {
+  const normalized = value.replace(/\\/g, "/");
+  const absolute = normalized.startsWith("/") || /^[A-Za-z]:\//.test(normalized) || normalized.startsWith("//");
+  return absolute && normalized.endsWith("dist/cli/index.js");
+}
+
+/**
+ * Decide whether a host config entry is a launch this tool provably manages.
+ * The entry must contain exactly the expected fields (no `env`, `enabled`,
+ * `environment`, or any other extra field) and match either the pinned npm
+ * package token shape or the absolute source-checkout `node` launch shape.
+ * Returns the installed version token or checkout path, or null when the entry
+ * cannot be proven managed.
+ */
+export function classifyManagedEntry(entry: Record<string, unknown>, format: ManagedEntryFormat): ManagedLaunch | null {
+  let full: unknown[];
+  if (format === "command-args") {
+    const keys = Object.keys(entry).sort();
+    if (keys.length !== 2 || keys[0] !== "args" || keys[1] !== "command") return null;
+    if (typeof entry.command !== "string" || !Array.isArray(entry.args)) return null;
+    full = [entry.command, ...entry.args];
+  } else {
+    const keys = Object.keys(entry).sort();
+    if (keys.length !== 2 || keys[0] !== "command" || keys[1] !== "type") return null;
+    if (entry.type !== "local" || !Array.isArray(entry.command)) return null;
+    full = [...entry.command];
+  }
+  if (
+    full.length === 5 &&
+    full[0] === "npx" &&
+    full[1] === "-y" &&
+    full[3] === "mcp" &&
+    full[4] === "serve" &&
+    typeof full[2] === "string" &&
+    PACKAGE_TOKEN.test(full[2])
+  ) {
+    return { mode: "npm", current: full[2] };
+  }
+  if (
+    full.length === 4 &&
+    full[0] === "node" &&
+    full[2] === "mcp" &&
+    full[3] === "serve" &&
+    typeof full[1] === "string" &&
+    isManagedCheckoutLaunch(full[1])
+  ) {
+    return { mode: "checkout", current: full[1] };
+  }
+  return null;
+}
+
 export interface HostInspection {
   entryPresent: boolean;
   managed: boolean;
@@ -113,6 +180,7 @@ export abstract class BaseHostAdapter implements HostAdapter {
   abstract resolveConfigPath(context: HostContext, scope: Scope): string;
   abstract planEntry(input: McpPlanInput): McpEntryPlanResult;
   abstract planRemoval(input: McpPlanInput): McpRemovalPlanResult;
+  abstract planUpdate(input: McpPlanInput): McpUpdatePlanResult;
   /** The config key this adapter owns, e.g. `context_servers.pi-task-exec`. */
   protected abstract entryKey(): string;
   protected abstract inspectConfig(context: HostContext, scope: Scope, currentContent: string | null, path: string, launch: McpLaunchSpec): HostInspection;

@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import type { HostAdapter, HostId, HostTarget, McpLaunchSpec } from "../hosts/adapters.js";
+import type { HostAdapter, HostId, HostTarget, McpLaunchSpec, McpPlanInput } from "../hosts/adapters.js";
 import type { SkillCliPlan, SkillInstaller } from "../installers/skill.js";
 import { PACKAGE_NAME, SKILL_NAME } from "../identity.js";
 import { sha256 } from "./safety.js";
@@ -8,7 +8,7 @@ import { sha256 } from "./safety.js";
 export const PLAN_SCHEMA = "pi-task-exec.plan.v1";
 export const MANAGED_BY = "pi-task-exec";
 
-export type PlanOperation = "add" | "remove" | "setup" | "doctor";
+export type PlanOperation = "add" | "remove" | "setup" | "update" | "doctor";
 export type PlanTarget = "mcp" | "skill" | "both";
 export type Scope = "project" | "global";
 
@@ -78,6 +78,33 @@ export interface ResolvedPaths {
   skillDir?: string;
 }
 
+/**
+ * Side-effect-free preview of one discovered component for an `update` plan.
+ * It carries the current and target version/ref so the operator can see
+ * exactly what will change before any write. File contents are never included.
+ */
+export interface UpdateComponentPreview {
+  target: "mcp" | "skill";
+  /** `update` writes, `no-op` is already at target, `absent` is not installed. */
+  state: "update" | "no-op" | "absent";
+  /** Managed config key for MCP, or the skill name. */
+  key?: string;
+  /** Absolute config path (MCP) or absolute skill directory (Skill). */
+  path?: string;
+  /** Installed version token/ref, when discovered and provably managed. */
+  current?: string;
+  /** Target version token/ref this run converges to. */
+  desired?: string;
+  /** Whether replacing the existing Skill directory may discard local edits. */
+  lossWarning?: boolean;
+}
+
+/**
+ * Read-only release-tag check injected into update planning. The default uses
+ * `git ls-remote` against the fixed GitHub repository; tests inject a stub.
+ */
+export type ReleaseTagPreflight = (tag: string) => Promise<{ ok: boolean; message?: string }>;
+
 export interface InstallPlan {
   schema: typeof PLAN_SCHEMA;
   operation: PlanOperation;
@@ -99,6 +126,8 @@ export interface InstallPlan {
   supported: boolean;
   /** Present for the pinned Skills CLI `add skill` install. */
   skillCli?: SkillCliPlan;
+  /** Discovered installed components and their current/target refs for `update`. */
+  updatePreview?: UpdateComponentPreview[];
 }
 
 export interface PlanRequest {
@@ -120,6 +149,8 @@ export interface PlanDependencies {
   launchMode: LaunchMode;
   /** Explicit opt-in required before writing a local checkout launch path. */
   localDev: boolean;
+  /** Read-only exact release-tag preflight; required for release-mode updates. */
+  releaseTagPreflight?: ReleaseTagPreflight;
 }
 
 export type LaunchMode = "npm" | "checkout";
@@ -237,6 +268,15 @@ export function serializePlan(plan: InstallPlan): Record<string, unknown> {
       config: plan.resolvedPaths.config ?? null,
       skillDir: plan.resolvedPaths.skillDir ?? null,
     },
+    updatePreview: (plan.updatePreview ?? []).map((item) => ({
+      target: item.target,
+      state: item.state,
+      key: item.key ?? null,
+      path: item.path ?? null,
+      current: item.current ?? null,
+      desired: item.desired ?? null,
+      lossWarning: item.lossWarning ?? false,
+    })),
     creates: [...plan.creates].sort(byPath).map(write),
     updates: [...plan.updates].sort(byPath).map(write),
     removals: [...plan.removals].sort(byPath).map(removal),
@@ -254,6 +294,7 @@ export function serializePlan(plan: InstallPlan): Record<string, unknown> {
           source: plan.skillCli.source,
           ref: plan.skillCli.ref,
           refKind: plan.skillCli.refKind,
+          currentRef: plan.skillCli.currentRef ?? null,
           command: plan.skillCli.command,
           args: [...plan.skillCli.args],
           cwd: plan.skillCli.cwd,
@@ -309,9 +350,17 @@ export function formatPlan(plan: InstallPlan): string {
     lines.push(`Skill agent: ${cli.agent}`);
     lines.push(`Skill source: ${cli.repository} (${cli.subpath})`);
     lines.push(`Skill ref: ${cli.ref} (${cli.refKind})`);
+    if (cli.currentRef) lines.push(`Skill current ref: ${cli.currentRef}`);
     lines.push(`Skill command: ${cli.command} ${cli.args.join(" ")}`);
     lines.push(`Skill install path: ${cli.installDir}`);
     lines.push(`Skill lock path: ${cli.lockFile}`);
+  }
+  if (plan.target !== "mcp" && plan.scope) {
+    lines.push(
+      `Skill scope: ${plan.scope}${
+        plan.scope === "global" ? " (shared .agents/skills across projects for this home)" : " (project-local .agents/skills)"
+      }`,
+    );
   }
   const section = (title: string, entries: string[]) => {
     lines.push(`${title}:`);
@@ -322,6 +371,19 @@ export function formatPlan(plan: InstallPlan): string {
   section("Updates", plan.updates.map((item) => `${item.path} — ${item.summary}`));
   section("Removals", plan.removals.map((item) => `${item.path} — ${item.summary}`));
   section("Backups", plan.backups.map((item) => `${item.path} -> ${item.backupPath} (${item.strategy}; ${item.reason})`));
+  if ((plan.updatePreview ?? []).length > 0) {
+    section(
+      "Update",
+      (plan.updatePreview ?? []).map((item) => {
+        const key = item.key ? ` [${item.key}]` : "";
+        const path = item.path ? ` ${item.path}` : "";
+        const current = item.current ? ` (current: ${item.current})` : "";
+        const desired = item.desired ? ` (target: ${item.desired})` : "";
+        const loss = item.lossWarning ? " — existing local changes may be lost" : "";
+        return `${item.target}: ${item.state}${key}${path}${current}${desired}${loss}`;
+      }),
+    );
+  }
   section("Conflicts", plan.conflicts.map((item) => `${item.path} — ${item.message}`));
   section("Skill safety", (plan.skillCli?.safety ?? []).map((item) => `${item.path} — ${item.message}`));
   section("Unsupported", plan.unsupported.map((item) => `${item.target}${item.host ? `/${item.host}` : ""} — ${item.message}`));
@@ -339,6 +401,83 @@ export const BACKUP_STRATEGY = "timestamped-sibling";
 /** Stable, truthful sibling pattern the executor will use for a backup. */
 function plannedBackupPath(path: string): string {
   return `${path}.backup-<timestamp>`;
+}
+
+function desiredLaunchLabel(deps: PlanDependencies): string {
+  return deps.launchMode === "checkout" ? (deps.launch.args[0] ?? deps.launch.command) : (deps.launch.args[1] ?? "");
+}
+
+/**
+ * Update planning for one already-installed MCP entry. It never creates an
+ * entry: an absent entry becomes a no-op warning that points at `setup`. A
+ * recognized managed entry whose only difference is the pinned npm semver
+ * token (or the current checkout launch) is rewritten; anything else conflicts.
+ */
+function planMcpUpdate(
+  plan: InstallPlan,
+  request: PlanRequest,
+  deps: PlanDependencies,
+  adapter: HostAdapter,
+  target: HostTarget,
+  configPath: string,
+  currentContent: string | null,
+  input: McpPlanInput,
+): void {
+  const host = request.host as string;
+  const scope = request.scope as Scope;
+  const desired = desiredLaunchLabel(deps);
+  const result = adapter.planUpdate(input);
+  if (result.kind === "unsupported") {
+    plan.unsupported.push(result.capability);
+    return;
+  }
+  if (result.kind === "conflict") {
+    plan.conflicts.push(result.conflict);
+    return;
+  }
+  if (result.kind === "absent") {
+    plan.updatePreview?.push({ target: "mcp", state: "absent", key: target.key, path: configPath, desired });
+    plan.warnings.push({
+      code: "not_installed",
+      message: `No managed pi-task-exec MCP entry exists in ${adapter.displayName} at ${configPath}; run pi-task-exec setup to install it.`,
+    });
+    return;
+  }
+  if (result.kind === "no-op") {
+    for (const warning of result.warnings) plan.warnings.push(warning);
+    plan.updatePreview?.push({ target: "mcp", state: "no-op", key: target.key, path: configPath, current: result.current, desired });
+    plan.warnings.push({ code: "already_up_to_date", message: `${adapter.displayName} already has the managed pi-task-exec MCP entry at ${configPath}.` });
+    return;
+  }
+  // The entry is provably managed and differs from the target launch. A
+  // checkout target still requires the explicit source-checkout opt-in.
+  if (deps.launchMode === "checkout") {
+    if (!deps.localDev) {
+      plan.conflicts.push({
+        code: "local_dev_required",
+        path: configPath,
+        message:
+          "The CLI is running from a source checkout. Writing an absolute local launch path requires explicit opt-in with --local-dev; the published npm package is the default launch entry.",
+      });
+      return;
+    }
+    plan.warnings.push({
+      code: "local_checkout_launch",
+      message: `This entry launches the local checkout at ${deps.launch.args[0] ?? deps.launch.command} with node, not a published npm package. The npm package is not published; re-run from an installed package before sharing this configuration.`,
+    });
+  }
+  for (const warning of result.warnings) plan.warnings.push(warning);
+  plan.updates.push({
+    path: configPath,
+    kind: "update",
+    target: "mcp",
+    host,
+    content: result.content,
+    baseSha256: currentContent === null ? null : sha256(currentContent),
+    summary: `Update the pi-task-exec MCP entry in ${adapter.displayName}.`,
+  });
+  plan.backups.push({ path: configPath, backupPath: plannedBackupPath(configPath), strategy: BACKUP_STRATEGY, reason: "update mcp entry" });
+  plan.updatePreview?.push({ target: "mcp", state: "update", key: target.key, path: configPath, current: result.current, desired });
 }
 
 async function planMcp(plan: InstallPlan, request: PlanRequest, deps: PlanDependencies): Promise<void> {
@@ -373,7 +512,7 @@ async function planMcp(plan: InstallPlan, request: PlanRequest, deps: PlanDepend
   }
 
   const configPath = target.path;
-  if (request.operation !== "remove" && deps.launchMode === "checkout") {
+  if (request.operation !== "remove" && request.operation !== "update" && deps.launchMode === "checkout") {
     if (!deps.localDev) {
       plan.conflicts.push({
         code: "local_dev_required",
@@ -390,6 +529,11 @@ async function planMcp(plan: InstallPlan, request: PlanRequest, deps: PlanDepend
   }
   const currentContent = (await adapter.readConfig(configPath)) ?? null;
   const input = { context: deps.context, scope, serverId: "pi-task-exec", launch: deps.launch, currentContent };
+
+  if (request.operation === "update") {
+    planMcpUpdate(plan, request, deps, adapter, target, configPath, currentContent, input);
+    return;
+  }
 
   if (request.operation === "remove") {
     const result = adapter.planRemoval(input);
@@ -458,9 +602,13 @@ async function planSkill(plan: InstallPlan, request: PlanRequest, deps: PlanDepe
     return;
   }
   const host = request.host;
-  if (request.operation === "add") {
+  if (request.operation === "add" || request.operation === "update") {
     if (!host) {
-      plan.conflicts.push({ code: "missing_agent", path: "", message: "add skill requires an explicit --host codex|zed|opencode to select the Skill Agent." });
+      plan.conflicts.push({
+        code: "missing_agent",
+        path: "",
+        message: `${request.operation} skill requires an explicit --host codex|zed|opencode to select the Skill Agent.`,
+      });
       return;
     }
     if (!deps.adapters.some((adapter) => adapter.id === host)) {
@@ -493,6 +641,18 @@ async function planSkill(plan: InstallPlan, request: PlanRequest, deps: PlanDepe
   for (const warning of result.plan.warnings) plan.warnings.push(warning);
   for (const conflict of result.plan.conflicts) plan.conflicts.push(conflict);
   if (result.plan.cli) plan.skillCli = result.plan.cli;
+  if (result.plan.update) {
+    const discovery = result.plan.update;
+    plan.updatePreview?.push({
+      target: "skill",
+      state: discovery.state,
+      key: SKILL_NAME,
+      path: discovery.installDir,
+      ...(discovery.currentRef !== undefined ? { current: discovery.currentRef } : {}),
+      desired: discovery.desiredRef,
+      lossWarning: result.plan.cli?.lossWarning === true,
+    });
+  }
   for (const write of result.plan.writes) {
     const kind = write.baseSha256 === null ? "create" : "update";
     plan[kind === "create" ? "creates" : "updates"].push({
@@ -538,6 +698,7 @@ export async function generatePlan(request: PlanRequest, deps: PlanDependencies)
     warnings: [],
     unsupported: [],
     supported: true,
+    updatePreview: [],
   };
 
   if (request.operation === "doctor") {
@@ -550,6 +711,37 @@ export async function generatePlan(request: PlanRequest, deps: PlanDependencies)
     if (target === "mcp") await planMcp(plan, request, deps);
     else await planSkill(plan, request, deps);
   }
+
+  // A release-mode Skill update depends on the exact `v${packageVersion}`
+  // GitHub tag. The read-only preflight runs during planning, so a missing or
+  // unverifiable tag conflicts the whole plan before the executor can write the
+  // MCP entry or invoke the Skills CLI. It is only required when a Skill update
+  // is actually planned: an MCP-only update (Skill absent or already current)
+  // and a checkout-mode commit Skill update are never blocked by an unrelated
+  // GitHub tag. There is never a fallback to a branch such as `main`, and no
+  // npm `latest` query is performed.
+  const skillUpdatePlanned = plan.skillCli !== undefined && plan.skillCli.refKind === "release";
+  if (request.operation === "update" && plan.conflicts.length === 0 && skillUpdatePlanned) {
+    const tag = `v${deps.packageVersion}`;
+    const preflight = deps.releaseTagPreflight;
+    if (!preflight) {
+      plan.conflicts.push({
+        code: "release_tag_unverified",
+        path: "",
+        message: `No release tag preflight is available to verify ${tag}; refusing to plan a release update.`,
+      });
+    } else {
+      const tagCheck = await preflight(tag);
+      if (!tagCheck.ok) {
+        plan.conflicts.push({
+          code: "release_tag_missing",
+          path: "",
+          message: tagCheck.message ?? `The release tag ${tag} could not be verified; refusing to update and never falling back to main.`,
+        });
+      }
+    }
+  }
+
   plan.supported = plan.unsupported.length === 0;
   return plan;
 }

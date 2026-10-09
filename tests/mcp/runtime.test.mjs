@@ -88,7 +88,7 @@ test("MCP discovery exposes delegation guidance, tool choice semantics, and type
   try {
     const initialized = await initialize(server);
     assert.equal(initialized.serverInfo.name, "pi-task-exec");
-    assert.equal(initialized.serverInfo.version, "0.1.1");
+    assert.equal(initialized.serverInfo.version, "0.1.0");
     assert.match(initialized.instructions, /subordinate coding workers/i);
     assert.match(initialized.instructions, /planning.*architecture.*delegation.*integration.*final review/i);
     assert.match(initialized.instructions, /never recursively delegate/i);
