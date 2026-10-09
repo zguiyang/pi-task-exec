@@ -1,8 +1,9 @@
 # Pi TaskExec 架构决策记录
 
-状态：架构决策历史记录；阶段 6 的 CLI 与产品标识实现由 2026-10-09 用户授权
+状态：架构决策历史记录；阶段 6 的 CLI 与产品标识实现由 2026-10-09 用户授权；2026-10-09 根级目录决策（选型 A）已批准
 日期：2026-10-08
 范围：架构与实施决策；本记录不授权修改运行时代码、Git、npm 或 MCP Registry。
+当前权威目录决策：第 13 节（2026-10-09，选型 A）。第 3、4、10 节中出现的 `mcp/src/`、`mcp/tests/`、`mcp/dist/`、`mcp/tsconfig.json`、`repository.subfolder: "mcp"` 等是阶段 2–8 的迁移过渡历史，仅供记录来源，不构成当前或未来的执行指令。
 
 ## 1. 产品定位
 
@@ -34,12 +35,14 @@ Pi TaskExec 是供主 Agent 调用的 MCP 调度、连接和执行控制层，�
 - 使用单一根 npm 包；`package.json`、`package-lock.json` 位于仓库根目录。名称取 `@zguiyang/pi-task-exec`，bin 仅提供 `pi-task-exec`，不提供旧 `pi-worker-mcp` alias。
 - 包名和 Registry server name 不要求相同。根 `package.json` 的 `name` 与 `server.json.packages[].identifier` 必须分别填入 npm 包名；根 `package.json.mcpName` 必须精确匹配 `server.json.name`，即 `io.github.zguiyang/pi-task-exec`。
 - `package.json.version`、`server.json.version` 和 `server.json.packages[].version` 必须完全一致，且为精确版本，不使用范围或 `latest`。
-- `server.json` 放仓库根目录，便于根包发布、Registry 校验和 CI 版本同步。其 `repository.url` 与 `websiteUrl` 使用新仓库地址；`repository.subfolder` 设为 `mcp`，指向 MCP 源码模块。Registry 的 generic `server.json` 规范支持 monorepo 的 `repository.subfolder`。
+- `server.json` 放仓库根目录，便于根包发布、Registry 校验和 CI 版本同步。其 `repository.url` 与 `websiteUrl` 使用新仓库地址。**（历史，已被第 13 节 2026-10-09 根级目录决策取代）** 早期方案曾把 `repository.subfolder` 设为 `mcp` 指向 MCP 源码模块；现选定单一产品根布局，应从 `server.json` 移除 `repository.subfolder: "mcp"`，`packageArguments` 保持 positional `mcp`、`serve` 不变。Registry 的 generic `server.json` 规范支持 `repository.subfolder`，但本仓库不再需要该字段。
 - Registry npm package entry 声明 `transport.type: "stdio"`，并通过 `packageArguments` 传入 positional arguments `mcp`、`serve`。它必须与 Host 配置和实际 CLI 完全一致；唯一明确启动契约是 `pi-task-exec mcp serve`。
 - Registry ID 是独立于 npm 包名的标识。改 npm 名不会自动创建或占用 Registry ID；阶段 1 已完成 npm 精确查询、Registry 精确搜索和 namespace 发布身份确认。
 - 阶段 1 证据：npm 精确查询返回 E404（当前无已发布包），MCP Registry 精确搜索返回 HTTP 200、count 0，官方 `mcp-publisher validate` 通过。这些结果只反映当前状态，正式发布前仍需再次核对；E404 不代表预留或发布权利。
 
-## 4. 目录与构建
+## 4. 目录与构建（历史布局，已被第 13 节取代）
+
+> **历史/非规范：** 本节的 `mcp/src/`、`mcp/tests/`、`mcp/dist/`、`mcp/tsconfig.json` 以及 `files`/测试路径描述，是阶段 2–8 的迁移过渡结构，已被 2026-10-09 根级目录决策（第 13 节，选型 A）取代。保留仅用于记录迁移来源，不构成当前或未来的执行指令；当前布局见第 13 节。
 
 保留 MCP 和 Skill 的模块边界，不使用 npm Workspaces：
 
@@ -180,9 +183,9 @@ Phase 2 已从本新仓库删除 `mcp/.codex/config.toml`：该文件含旧 chec
 - [OpenCode CLI](https://docs.opencode.ai/docs/cli/)
 - [Node.js release schedule](https://github.com/nodejs/Release)
 
-## 13. 2026-10-09 目录边界复审（覆盖第 4 节旧布局决策）
+## 13. 2026-10-09 目录边界复审（覆盖第 3、4 节旧布局与 `mcp` subfolder 决策）
 
-**状态：推荐结构已审查，尚未实施。** 当前 `mcp/src/`、`mcp/tests/`、`mcp/dist/` 是早期集成阶段的迁移过渡结构，不是最终产品结构。阶段 8 的 CLI 与三种 Host adapter 已完成；目录重构前暂停阶段 9（Skill 安装器），不得把阶段 9 与目录迁移混做一个变更。
+**状态：已批准选型 A（根级布局），目录重构尚未实施。** 当前 `mcp/src/`、`mcp/tests/`、`mcp/dist/` 是早期集成阶段的迁移过渡结构，不是最终产品结构；本节取代第 3 节的 `repository.subfolder: "mcp"` 与第 4 节的旧目录/构建描述。阶段 8 的 CLI 与三种 Host adapter 已完成；目录重构前暂停阶段 9（Skill 安装器），不得把阶段 9 与目录迁移混做一个变更。
 
 产品由一个根 npm 包、一个 CLI 入口、MCP Server 和 Skill 组成。根目录统一管理 CLI、MCP、Skill、测试和文档；不使用 npm Workspaces。最终边界为：
 

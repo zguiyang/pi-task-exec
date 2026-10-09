@@ -7,8 +7,7 @@
   "websiteUrl": "https://github.com/zguiyang/pi-task-exec",
   "repository": {
     "url": "https://github.com/zguiyang/pi-task-exec",
-    "source": "github",
-    "subfolder": "mcp"
+    "source": "github"
   },
   "packages": [
     {

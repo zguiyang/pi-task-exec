@@ -7,6 +7,10 @@ authorization, task decomposition, integration, review, and final acceptance;
 Pi TaskExec creates, connects to, and supervises bounded Pi workers and returns
 structured status and results for independent verification.
 
+The product is a host-agnostic stdio MCP server that supervises local
+[Pi](https://pi.dev) coding-agent processes over Pi RPC. It is not a hosted
+service and does not manage Pi credentials, providers, or default models.
+
 The core flow is: Supervisor → Pi TaskExec MCP → Pi Worker → structured
 status/result → Supervisor review and acceptance. `inspect`/`implement` are
 tool capability profiles and `direct`/`worktree` are working-directory modes;
@@ -14,15 +18,17 @@ neither is an operating-system security sandbox.
 
 > Status: Phases 6–8 have been implemented in this checkout. Stage 8 adds real
 > Codex, Zed, and OpenCode MCP install/remove with safe TOML/JSONC merging,
-> backups, and managed-entry removal. Stage 9 the generic `.agents/skills/`
-> installer and stage 10 MCP/Skill contract synchronization and tool renaming
-> have not started. The npm package and MCP Registry entry have not been
-> published. For current development, build from source and run
-> `node mcp/dist/index.js mcp serve`; `mcp/dist/` is generated output from
-> `mcp/src/`. When run from this checkout the installer writes a
-> `node <absolute-checkout>/mcp/dist/index.js mcp serve` launch entry only when
-> `--local-dev` is passed, and never represents that local path as the published
-> npm package.
+> backups, and managed-entry removal. The 2026-10-09 root-level directory
+> decision (layout A: root `cli/`, `mcp/`, `skills/`, `tests/`, `docs/`, and a
+> root `dist/`) is approved; this README describes that target layout. Stage 9
+> (the generic `.agents/skills/` installer) and stage 10 (MCP/Skill contract
+> synchronization and tool renaming) have not started. The npm package and MCP
+> Registry entry have not been published. For current development, build from
+> source and run `node dist/cli/index.js mcp serve`; `dist/` is generated
+> output from `cli/` and `mcp/`. When run from this checkout the installer
+> writes a `node <absolute-checkout>/dist/cli/index.js mcp serve` launch entry
+> only when `--local-dev` is passed, and never represents that local path as the
+> published npm package.
 
 ## CLI surface
 
@@ -33,15 +39,20 @@ the MCP Registry entry. All six MCP tools (`pi_spawn`, `pi_status`,
 | Command | Behavior |
 | --- | --- |
 | `pi-task-exec` (no arguments) | Prints help and exits `0`; never starts MCP. |
-| `pi-task-exec --help` | Prints help and exits `0`. |
-| `pi-task-exec --version` | Prints only `0.1.1` and exits `0`. |
+| `pi-task-exec --help` | Prints help and exits `0`; never starts MCP. |
+| `pi-task-exec --version` | Prints only `0.1.1` and exits `0`; never starts MCP. |
 | `pi-task-exec mcp serve` | Starts the existing MCP stdio runtime. |
-| `pi-task-exec doctor [--json]` | Read-only environment, host, skill, and version-contract check. |
-| `pi-task-exec add mcp --host <codex\|zed\|opencode> --scope <project\|global> [--dry-run] [--json] [--yes]` | Plans and safely merges the host MCP entry (stage 8). |
-| `pi-task-exec remove mcp --host <...> --scope <...>` | Plans removal of only the managed host MCP entry. |
-| `pi-task-exec add skill --scope <project\|global>` | Plans the bundled skill through the installer seam. |
-| `pi-task-exec remove skill --scope <project\|global>` | Plans skill removal through the installer seam. |
-| `pi-task-exec setup --target <mcp\|skill\|both> [--host <...>] --scope <...>` | Plans combined setup. |
+| `pi-task-exec doctor [--json]` | Read-only environment, host, skill, and version-contract check; never starts MCP. |
+| `pi-task-exec add mcp --host <codex\|zed\|opencode> --scope <project\|global> [--dry-run] [--json] [--yes]` | Plans and safely merges the host MCP entry (stage 8); never starts MCP. |
+| `pi-task-exec remove mcp --host <...> --scope <...>` | Plans removal of only the managed host MCP entry; never starts MCP. |
+| `pi-task-exec add skill --scope <project\|global>` | Plans the bundled skill through the installer seam; never starts MCP. |
+| `pi-task-exec remove skill --scope <project\|global>` | Plans skill removal through the installer seam; never starts MCP. |
+| `pi-task-exec setup --target <mcp\|skill\|both> [--host <...>] --scope <...>` | Plans combined setup; never starts MCP. |
+
+Only the explicit `mcp serve` route initializes and starts the MCP runtime.
+Ordinary `help`, `--version`, `add`, `remove`, `setup`, and `doctor` do not
+start MCP. Running `pi-task-exec` with no arguments prints help and does not
+start MCP.
 
 The CLI is a pure parser/router over a shared, stable plan model plus a
 separately testable plan executor. Every write command first prints a plan with
@@ -76,20 +87,126 @@ Any unrecognized input, including the removed top-level `serve`, `version`,
 `update`, and `uninstall` routes and the unsupported `--all-hosts` flag,
 reports an error and exits `1`.
 
-## Current status and non-claims
+## Installation and launch contract
 
-Phases 6–8 are implemented in this checkout. The following are **not**
-implemented and are **not** claimed:
+Prerequisites: Node.js 20+, a locally installed and configured `pi` executable,
+and Git when using isolated worktrees.
 
-- the npm tarball has been generated locally, but the package has not been
-  published and cannot currently be installed from npm; no MCP Registry record
-  has been published;
-- stage 9 generic `.agents/skills/` installer has not started; skill operations
-  report pending/unavailable;
-- stage 10 tool migration has not started; the existing `pi_*` tools remain
-  and migration to `task_*` is planned for that stage;
-- `doctor` is read-only and does not prove that a host configuration works;
-- no release or version compatibility promise.
+The npm package has not been published, so it cannot currently be installed
+from npm. The `add`/`remove`/`setup` commands perform real host configuration
+writes, after printing the plan and revalidating it.
+
+From an installed package the launch entry is the npm stdio contract:
+
+```text
+command: npx
+args:    -y @zguiyang/pi-task-exec@<version> mcp serve
+```
+
+After version `0.1.1` is published, the same launch is:
+
+```text
+command: npx
+args:    -y @zguiyang/pi-task-exec@0.1.1 mcp serve
+```
+
+From this source checkout, build first and launch the compiled CLI directly:
+
+```sh
+node dist/cli/index.js mcp serve
+```
+
+or use the thin package launcher, which only imports `dist/cli/index.js`:
+
+```sh
+node bin/pi-task-exec.mjs mcp serve
+```
+
+When run from this checkout the installer detects the checkout and, with the
+explicit `--local-dev` opt-in, writes a
+`node <absolute-checkout>/dist/cli/index.js mcp serve` launch entry; without
+`--local-dev` the plan reports `local_dev_required` and writes nothing. The
+installer never represents that local path as the published npm package. From
+an installed package it writes the
+`npx -y @zguiyang/pi-task-exec@<version> mcp serve` entry. `doctor` is a
+read-only check and does not modify any host configuration.
+
+## Host configuration reference
+
+Host installers are implemented for Codex, Zed, and OpenCode. The table records
+the paths each adapter resolves and the shape of the managed entry. Every write
+is path-boundary and symlink checked, written through a same-directory
+temporary file with an atomic rename, and backed up before an update. `remove`
+deletes only an entry that matches the `pi-task-exec` managed fingerprint.
+
+| Host | User/global config | Project config | Entry |
+| --- | --- | --- | --- |
+| Codex | `$CODEX_HOME/config.toml`, else `~/.codex/config.toml` | `.codex/config.toml` | TOML `[mcp_servers.pi-task-exec]` with a `command` string and `args` array |
+| Zed | macOS/Linux: `$XDG_CONFIG_HOME/zed/settings.json`, else `~/.config/zed/settings.json`; Windows: `%APPDATA%\Zed\settings.json` | `.zed/settings.json` | JSONC `context_servers.pi-task-exec` with a `command` string, `args` array, and optional `env` |
+| OpenCode | `OPENCODE_CONFIG`, else `$OPENCODE_CONFIG_DIR/opencode.json`, else `$XDG_CONFIG_HOME/opencode/opencode.json`, else `~/.config/opencode/opencode.json` | `opencode.json`, or an existing `opencode.jsonc` | JSONC `mcp.pi-task-exec` with `type: "local"`, a `command` array, and optional `enabled`/`environment` |
+
+OpenCode's current supported config file names are `opencode.json` and
+`opencode.jsonc`; no other name is read or written. The runtime launch entry
+depends on how the CLI is run: from an installed package it is
+`npx -y @zguiyang/pi-task-exec@<version> mcp serve`; from a source checkout it
+is `node <absolute-checkout>/dist/cli/index.js mcp serve`, and the install is
+refused unless `--local-dev` is passed. An explicit absolute `CODEX_HOME`,
+`OPENCODE_CONFIG`, `OPENCODE_CONFIG_DIR`, or `XDG_CONFIG_HOME` override is
+honoured as that user's chosen config location rather than failing with a
+generic path error.
+
+Codex loads project `.codex/config.toml` only for projects it trusts, and Zed
+Restricted Mode ignores project `.zed/settings.json` MCP servers until the
+worktree is trusted. The installer surfaces this in the plan and `doctor`, and
+does not grant either trust. OpenCode reads a custom config file from
+`OPENCODE_CONFIG` and a custom config directory from `OPENCODE_CONFIG_DIR`; the
+inline `OPENCODE_CONFIG_CONTENT` value is never written and is reported as a
+runtime override. `OPENCODE_DISABLE_PROJECT_CONFIG` disables the project file.
+Skill installation still reports pending/unavailable.
+
+## Environment variables
+
+| Environment variable | Used by | Purpose |
+| --- | --- | --- |
+| `PI_TASK_EXEC_LAUNCH_MODE` | launcher | Force `npm` or `checkout` launch mode instead of auto-detection |
+| `CODEX_HOME` | Codex | User config directory (default `~/.codex`) |
+| `XDG_CONFIG_HOME` | Zed, OpenCode | Base config directory when the host-specific override is unset |
+| `APPDATA` | Zed (Windows) | Windows user config base for `Zed\settings.json` |
+| `OPENCODE_CONFIG` | OpenCode | Custom config file path |
+| `OPENCODE_CONFIG_DIR` | OpenCode | Custom global config directory |
+| `OPENCODE_CONFIG_CONTENT` | OpenCode | Inline runtime config; never written, only reported |
+| `OPENCODE_DISABLE_PROJECT_CONFIG` | OpenCode | Ignore the project `opencode.json` |
+
+## Runtime configuration
+
+| Environment variable | Default | Purpose |
+| --- | --- | --- |
+| `PI_WORKER_COMMAND` | `pi` | Pi executable |
+| `PI_WORKER_MAX_WORKERS` | `4` | Maximum live workers |
+| `PI_WORKER_RPC_TIMEOUT_MS` | `15000` | Per-RPC timeout |
+| `PI_WORKER_IDLE_TIMEOUT_MS` | `600000` | Idle deadline; `0` disables it |
+| `PI_WORKER_TASK_TIMEOUT_MS` | `3600000` | Activity-cycle deadline |
+| `PI_WORKER_ALLOWED_ROOTS` | current directory | Path-delimited allowed roots |
+
+No secret environment variable is required; Pi reads its own local
+authentication configuration.
+
+## MCP tools
+
+`pi_spawn`, `pi_status`, `pi_steer`, `pi_continue`, `pi_abort`, and `pi_list`
+supervise bounded local workers. Successful spawn/continuation means Pi
+accepted work, not that it is correct; the supervising agent must inspect
+results and integrate changes. Use `worktree` mode for isolated implementation
+work.
+
+## Model ownership and host independence
+
+Pi owns provider authentication, available models, and its default model. The
+worker runtime can validate an optional per-worker override and report the
+effective model, but never configures credentials. Core runtime behavior—Pi
+RPC, lifecycle, model semantics, concurrency, and permissions—is independent of
+Codex, Zed, and OpenCode. Host adapters only read, merge, and remove launch
+configuration.
 
 ## Product identity
 
@@ -126,22 +243,86 @@ evidence of the current state, not a release commitment, and the project must
 still stop rather than fall back to an old name if the target Registry ID is
 occupied at publication time.
 
+## Current status and non-claims
+
+Phases 6–8 are implemented in this checkout. The following are **not**
+implemented and are **not** claimed:
+
+- the npm tarball has been generated locally, but the package has not been
+  published and cannot currently be installed from npm; no MCP Registry record
+  has been published;
+- stage 9 generic `.agents/skills/` installer has not started; skill operations
+  report pending/unavailable;
+- stage 10 tool migration has not started; the existing `pi_*` tools remain
+  and migration to `task_*` is planned for that stage;
+- `doctor` is read-only and does not prove that a host configuration works;
+- no release or version compatibility promise.
+
 ## Repository layout and responsibilities
+
+The repository is a single root npm package (no npm Workspaces). Layout A keeps
+one root product root: CLI, MCP server, Skill, tests, documentation, and build
+output all live under the root.
 
 | Path | Responsibility |
 | --- | --- |
-| `mcp/` | MCP worker runtime source (`mcp/src/`), per-host install adapters (`mcp/src/hosts/`), tests (`mcp/tests/`), build config, and module docs. |
+| `bin/pi-task-exec.mjs` | Thin package launcher; only imports and calls `dist/cli/index.js`. No business implementation. |
+| `cli/` | CLI parser/router, commands, host install adapters (`cli/hosts/`), installer seam (`cli/installers/`), plan model and safety executor (`cli/plan/`), and CLI identity/IO. |
+| `mcp/` | MCP server entry, tools, workers, Pi RPC, and runtime. Does not import the CLI. |
 | `skills/pi-delegate/` | The `pi-delegate` delegation-policy Skill and its `references/`. Maintained by JoeyZhao in the `agent-skills` project. |
+| `tests/` | Unified tests under `tests/cli/`, `tests/mcp/`, and `tests/hosts/`, with MCP fixtures under `tests/mcp/fixtures/`. |
 | `docs/architecture/` | Architecture decision record, implementation plan, and risk register for the migration. |
+| `docs/release-standard-baseline.md` | Release standard baseline and distribution contract. |
+| `dist/` | Generated build output: `dist/cli/index.js` (CLI) and `dist/mcp/index.js` (MCP Server). Intentionally not tracked. |
 | `README.md` | This overview. |
 | `LICENSE` | Root MIT license for the integrated repository. |
+| `server.json` | Root MCP Registry metadata. |
 | `.gitignore` | Root ignore rules. |
 
-`mcp/dist/` is generated build output from `mcp/src/` and is intentionally not
-tracked. The root `package.json`, `package-lock.json`, and `server.json` carry
-the new identity. Phase 6 CLI routing and the integrated test suite are
+The root `package.json`, `package-lock.json`, and `server.json` carry the
+product identity. Phase 6 CLI routing and the integrated test suite are
 verified; public npm publication and stage 12 tarball acceptance remain
 pending.
+
+## Development, contributing, and releases
+
+Source mode is only for contributors. From the repository root:
+
+```sh
+npm install
+npm run build        # tsc -p tsconfig.json -> dist/cli/ and dist/mcp/
+npm run typecheck    # tsc --noEmit, no output
+npm test             # builds dist/, then runs the tests under tests/
+npm start            # node bin/pi-task-exec.mjs mcp serve
+```
+
+- `build` compiles the root TypeScript sources (`cli/**/*.ts` and
+  `mcp/**/*.ts`) into the root `dist/`.
+- `typecheck` runs the compiler with `--noEmit` and writes nothing.
+- `test` first builds `dist/` and then runs the unified suite under `tests/`.
+- `start` runs the compiled CLI `mcp serve` route through the thin
+  `bin/pi-task-exec.mjs` launcher; it is the same service-start contract used by
+  host configuration and the Registry entry.
+- `prepack` rebuilds the root `dist/` before packaging.
+
+Tests import the root `dist/` through stable relative paths (for example
+`../../dist/cli/...` and `../../dist/mcp/...`). The MCP stdio smoke test starts
+`mcp serve` through the thin `bin/pi-task-exec.mjs` launcher.
+
+For release-equivalent testing, use `npm pack` and execute the resulting `.tgz`
+from a clean temporary directory; `npm link` is not package acceptance. The
+`prepack` script rebuilds the root `dist/` so the tarball contains the thin
+`bin/`, root `dist/**`, the complete `skills/pi-delegate/**`, and the required
+root documents, licenses, and `server.json`. npm publication and MCP Registry
+publication are separate, explicit actions and have not occurred.
+
+## Registry metadata
+
+The root `server.json` follows the official MCP Registry schema and declares an
+npm stdio package representation whose `packageArguments` are the positional
+arguments `mcp` and `serve`, matching the tested `pi-task-exec mcp serve`
+contract. The package ships the MCP runtime (root `dist/**`) and the
+`pi-delegate` Skill (`skills/pi-delegate/**`).
 
 ## Migration history
 
@@ -150,9 +331,14 @@ names in this section are recorded only as migration provenance; they are not
 current product names and must not appear in runtime code, current installation
 instructions, or package metadata.
 
-- The `mcp/` module was migrated from the `pi-worker-mcp` project.
+- The MCP module was migrated from the `pi-worker-mcp` project.
 - The `pi-delegate` Skill is maintained by JoeyZhao in the `agent-skills`
   project.
+
+The repository previously used a migration-transition layout that kept all CLI,
+host-adapter, and MCP source and tests inside the MCP module and emitted build
+output there. The approved 2026-10-09 layout A replaces that with root `cli/`,
+`mcp/`, `tests/`, root `dist/`, and the thin `bin/pi-task-exec.mjs` launcher.
 
 **Both old projects remain.** The previous repositories and their local
 checkouts are not retired, renamed, or deleted. They are only to be retired as
@@ -163,56 +349,10 @@ accepted, following the order and gates recorded in
 This repository does not use the old repositories' Git history; it was
 initialized fresh in this checkout.
 
-## Installation
-
-The npm package has not been published, so it cannot currently be installed
-from npm. The `add`/`remove`/`setup` commands now perform real host
-configuration writes, after printing the plan and revalidating it. When run
-from this source checkout, the installer detects the checkout and, with the
-explicit `--local-dev` opt-in, writes a
-`node <absolute-checkout>/mcp/dist/index.js mcp serve` launch entry; it never
-represents that local path as the published npm package. From an installed
-package it writes the `npx -y @zguiyang/pi-task-exec@<version> mcp serve` entry.
-During current development, build from source and launch with
-`node mcp/dist/index.js mcp serve`.
-
-Resolved host configuration paths (stage 8):
-
-| Host | User config | Project config | Entry |
-| --- | --- | --- | --- |
-| Codex | `$CODEX_HOME/config.toml` or `~/.codex/config.toml` | `.codex/config.toml` | TOML `[mcp_servers.pi-task-exec]` |
-| Zed | macOS/Linux `$XDG_CONFIG_HOME/zed/settings.json` or `~/.config/zed/settings.json`; Windows `%APPDATA%\Zed\settings.json` | `.zed/settings.json` | JSONC `context_servers.pi-task-exec` |
-| OpenCode | `OPENCODE_CONFIG`, else `$OPENCODE_CONFIG_DIR`/`$XDG_CONFIG_HOME`, else `~/.config/opencode/opencode.json` | `opencode.json` (or an existing `opencode.jsonc`) | JSONC `mcp.pi-task-exec` with `type: "local"` |
-
-After version `0.1.1` is published, this will be a future npm-based stdio launch
-example. This command is executable only after the corresponding version has
-been published:
-
-```text
-command: npx
-args:    -y @zguiyang/pi-task-exec@0.1.1 mcp serve
-```
-
-`doctor` is a read-only check and does not modify any host configuration.
-
-## Development from source
-
-```sh
-npm install
-npm run build
-npm test
-node mcp/dist/index.js mcp serve
-```
-
-`npm test` builds `mcp/src` and then runs the tests under `mcp/tests/`. For
-release-equivalent testing, use `npm pack` and execute the resulting `.tgz`
-from a clean temporary directory; `npm link` is not package acceptance.
-
 ## Licensing
 
-The root [`LICENSE`](LICENSE) is the MIT license for the integrated repository,
-with copyright held by `zguiyang`.
-
-[`mcp/LICENSE`](mcp/LICENSE) is preserved as the module-origin license for the
-MCP module and remains in effect for that module under the same MIT terms.
-There is no separate `NOTICE` file; none is required for the current scope.
+The root [`LICENSE`](LICENSE) is the single MIT license for the integrated
+repository and the only package license source, with copyright held by
+`zguiyang`. The migration to layout A does not change the MIT terms that apply
+to the MCP module code. There is no separate `NOTICE` file; none is required
+for the current scope.

@@ -1,15 +1,14 @@
 # Dependencies
 node_modules/
 
-# Build output (generated from mcp/src via the build/prepack flow)
-mcp/dist/
+# Build output (generated from cli/ and mcp/ via the root build/prepack flow)
+dist/
 *.tsbuildinfo
 
 # Test and coverage output
 coverage/
 .nyc_output/
 .pi-task-exec/
-mcp/.pi-task-exec/
 
 # Temporary build/test files and directories
 tmp/

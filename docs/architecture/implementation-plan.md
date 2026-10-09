@@ -1,9 +1,11 @@
 # Pi TaskExec 实施计划
 
-状态：阶段 1–5 已完成；阶段 6 已完成，待 Supervisor 审查；阶段 7 已完成，待 Supervisor 审查（提交 `bba829b`）；阶段 8 已在本 checkout 实现，待 Supervisor 审查；阶段 9、10 未开始；npm 和 MCP Registry 均未发布。
+状态：阶段 1–5 已完成；阶段 6 已完成，待 Supervisor 审查；阶段 7 已完成，待 Supervisor 审查（提交 `bba829b`）；阶段 8 已在本 checkout 实现，待 Supervisor 审查；2026-10-09 根级目录决策（选型 A）已批准，目录重构尚未实施；阶段 9 暂停、不在本 repo task 范围；阶段 10–14 未开始；npm 和 MCP Registry 均未发布。
 日期：2026-10-09
 
 本计划按依赖顺序执行。任何阶段均不得越过公开发布门槛；Registry ID 冲突时停止，不回退旧名称。阶段 1–8 已完成，阶段 6、7、8 待 Supervisor 审查；后续阶段仍须单独遵守其授权和发布门槛。
+
+> **历史与当前权威：** 阶段 1–8 的描述记录当时的迁移过渡布局，其中 `mcp/src/`、`mcp/tests/`、`mcp/dist/`、`mcp/tsconfig.json`、`package.json.files = mcp/dist/**`、`bin = ./mcp/dist/index.js`、`mcp/tests/*.test.mjs` 等路径均为历史，已被 2026-10-09 根级目录决策（选型 A：根 `cli/`、`mcp/`、`skills/`、`tests/`、`docs/`、根 `dist/`；根 `tsconfig.json`/`package.json`/`server.json`；薄 `bin/pi-task-exec.mjs`；不使用 npm Workspaces）取代。阶段 10 完成前，六个现有 `pi_*` 工具名（`pi_spawn`、`pi_status`、`pi_steer`、`pi_continue`、`pi_abort`、`pi_list`）继续保留为运行时契约。当前执行与迁移以本文件底部“2026-10-09 目录重构审查与迁移计划”为准。
 
 ## 阶段 1：许可证和命名验证
 
@@ -38,7 +40,7 @@
 - **人工决策**：最终版本号；建议 `0.2.0`，不建议当前直接 `1.0.0`。
 - **执行状态（已完成）**：根 `package.json` 和 lockfile 已整合新包名、CLI bin、构建入口和打包清单。
 
-## 阶段 4：MCP 构建路径迁移
+## 阶段 4：MCP 构建路径迁移（历史，构建路径已被选型 A 取代）
 
 - **前置依赖**：阶段 3 的包根已确定。
 - **修改范围**：根 scripts、`mcp/tsconfig.json`（仅确有必要时）、CLI 入口路径、构建说明。
@@ -92,42 +94,43 @@
 - **人工决策**：Host/平台的支持边界；若某组合不可验证，明确不支持。
 - **执行状态（2026-10-09）**：已实现 Codex、Zed、OpenCode 的真实安装/移除适配器（`mcp/src/hosts/`）。路径解析：Codex 用户级遵循 `$CODEX_HOME`，否则 `~/.codex/config.toml`，项目级 `.codex/config.toml`；Zed 用户级：macOS/Linux 遵循 `$XDG_CONFIG_HOME/zed/settings.json`，否则 `~/.config/zed/settings.json`；Windows 使用 `%APPDATA%\Zed\settings.json`（按平台使用 win32 路径语义），项目级 `.zed/settings.json`；OpenCode 用户级遵循 `OPENCODE_CONFIG`，否则 `OPENCODE_CONFIG_DIR`/`$XDG_CONFIG_HOME` 下的 `opencode.json`，项目级 `opencode.json`；受支持的文件名仅为官方 `opencode.json`/`opencode.jsonc`，不再考虑 `config.json`。格式：Codex 使用 TOML parser（`smol-toml`）校验加字符级表区域扫描，保留无关 section、值与注释；Zed/OpenCode 使用 `jsonc-parser` 做保注释、保留无关字段的最小编辑，无法安全解析时拒绝写入。OpenCode 采用稳定 schema `mcp.<name>`、`type: "local"`、`command` 数组，不使用 `mcp.servers`。安装/移除基于严格的 pi-task-exec 受管指纹：仅当现有条目与本次将要写入的条目逐字段完全一致时才是幂等；旧版本、不同本地路径、额外或被修改的字段均为指纹漂移，add 报冲突且绝不覆盖，remove 报冲突且绝不删除。真实写入复用阶段 7 执行器与安全原语（绝对路径、根边界与符号链接保护、同目录临时文件加原子 rename、写入前备份、失败回滚）。npm 安装模式为默认，启动为 `npx -y @zguiyang/pi-task-exec@<version> mcp serve`；源码 checkout 模式必须显式传入 `--local-dev`，否则计划报 `local_dev_required` 且不写入，写入值为 `node <绝对 checkout>/mcp/dist/index.js mcp serve`，均以结构化 argv 传递、不经过 shell。真实 `.git` checkout 检测优先于 `PI_TASK_EXEC_LAUNCH_MODE`：存在 `.git` 时不能被强制为 npm 模式，避免把未发布的 checkout 表示成已发布的 npx 包；`--local-dev` 仍是写入本地 node 路径的唯一入口。项目级计划与 doctor 明确提示 Codex trusted project 与 Zed Restricted Mode 不会由本工具授予。计划 JSON/文本与 doctor 输出 host/platform、绝对配置路径、配置格式、被修改的配置 key、支持状态、备份策略、重启与 trust 要求；doctor 另报告解析状态与受管/指纹漂移状态，均不输出文件内容。绝对 `CODEX_HOME`/`OPENCODE_CONFIG`/`OPENCODE_CONFIG_DIR`/`XDG_CONFIG_HOME` 覆盖被视为用户显式选择并加入执行 roots，避免通用 path_escape 失败。已新增 TOML/JSONC 与三 Host 适配器测试（隔离临时 home/cwd 与 mock 环境变量，不触碰真实用户配置）；`npm test`、`npm run build`、`npm run typecheck`、`npm pack --dry-run --json` 均通过。未发布 npm/Registry，未改动 MCP 工具名/schema 与 Worker 运行时。
 
-## 阶段 9：通用 .agents/skills 安装器
+## 阶段 9：通用 .agents/skills 安装器（暂停，暂不在本 repo task 实施）
 
-- **前置依赖**：阶段 5、7；Skill 许可明确。
-- **修改范围**：Skill 安装器、CLI 测试、安装 manifest 格式。
-- **具体任务**：实现 `.agents/skills/pi-delegate` 的 project/global scope；使用 Node home API；dry-run、同内容幂等、差异冲突默认拒绝、显式备份升级、原子 staging/rename 与回滚检查。
-- **验收条件**：macOS/Linux/Windows 路径测试通过；不会覆盖不同内容的同名 Skill；备份和恢复只操作管理器记录且未被用户修改的文件。
+- **状态**：暂停。本 repo task 只做文档同步与目录迁移，不实施 Skill 安装器；不得把阶段 9 与目录重构混为同一变更。
+- **前置依赖**：阶段 5、7；Skill 许可明确；**2026-10-09 根级目录重构完成，根级测试与真实 tarball 验收通过**；Skill 源路径稳定为根 `skills/pi-delegate/`，安装器从包根稳定定位该目录，不引用旧 `mcp/dist` 或旧资源路径。
+- **修改范围**：Skill 安装器（预期位于根 `cli/installers/`）、根 `tests/` 下的 CLI/Skill 安装测试、安装 manifest 格式。
+- **具体任务**：实现 `.agents/skills/pi-delegate` 的 project/global scope；从根 `skills/pi-delegate/` 读取 Skill 源；使用 Node home API；dry-run、同内容幂等、差异冲突默认拒绝、显式备份升级、原子 staging/rename 与回滚检查。
+- **验收条件**：根 `tests/` 下 macOS/Linux/Windows 路径测试通过；不会覆盖不同内容的同名 Skill；备份和恢复只操作管理器记录且未被用户修改的文件。
 - **回滚方式**：根据 manifest 恢复旧目录；有用户修改则停止并保留现场。
 - **公开发布影响**：无。
-- **人工决策**：项目级是否作为交互式默认值；global 必须可显式选择。
+- **人工决策**：目录重构与 tarball 验收完成后，决定是否启动本阶段；项目级是否作为交互式默认值；global 必须可显式选择。
 
 ## 阶段 10：MCP/Skill 契约同步与工具改名
 
-- **前置依赖**：阶段 6 命名决策，阶段 5 Skill 包装方案。
-- **修改范围**：MCP 工具注册、类型/描述、Skill、reference、README、样例、Registry description、契约测试。
-- **具体任务**：将工具改为 `task_*`；统一 Delegation-First 规则；同步 profile/mode/continuation/worktree/--no-session/terminal 状态语义；定义最低 MCP 契约版本并写入机器可读兼容清单。
-- **验收条件**：源码注册、测试 schema、Skill/reference/示例一致；无旧 alias；Worker 边界没有被描述为文件系统沙箱；Supervisor 保留验收责任。
+- **前置依赖**：阶段 6 命名决策，阶段 5 Skill 包装方案；2026-10-09 根级目录重构完成（修改面位于根 `mcp/tools/`、`mcp/runtime/`、根 `skills/pi-delegate/`、根 `tests/`）。
+- **修改范围**：MCP 工具注册（根 `mcp/tools/`）、类型/描述、根 `skills/pi-delegate/`、references、根 README、样例、Registry description、根 `tests/` 契约测试。
+- **具体任务**：将工具改为 `task_*`；统一 Delegation-First 规则；同步 profile/mode/continuation/worktree/--no-session/terminal 状态语义；定义最低 MCP 契约版本并写入机器可读兼容清单。**在阶段 10 完成前，六个现有 `pi_*` 名称（`pi_spawn`、`pi_status`、`pi_steer`、`pi_continue`、`pi_abort`、`pi_list`）继续作为运行时契约保留，不得提前改名。**
+- **验收条件**：根 `dist/mcp/` 中源码注册、根 `tests/` schema、Skill/reference/示例一致；无旧 `pi_*` alias 残留（历史说明除外）；Worker 边界没有被描述为文件系统沙箱；Supervisor 保留验收责任。
 - **回滚方式**：发布前可整组回退名称；不得只回退 Skill 或只回退 MCP。
 - **公开发布影响**：构成新 MCP API 首发契约。
 - **人工决策**：接受工具中立命名及契约版本格式。
 
 ## 阶段 11：测试和 GitHub Actions
 
-- **前置依赖**：阶段 4、7、8、9、10。
-- **修改范围**：测试、CI workflows 和发布验证脚本。
-- **具体任务**：加入 MCP 单元/lifecycle/工具契约、Skill 静态契约、CLI、Host 配置、Skill 安装、重复安装、冲突保护、三平台、Node 矩阵、Registry schema 和版本一致性验证。
-- **验收条件**：PR CI 无发布凭据、不自动发布；Node 版本、OS 和本地目录使用隔离环境；所有矩阵可重复。
+- **前置依赖**：阶段 4、7、8、10；2026-10-09 根级目录重构完成（根 `tests/`、根 `dist/`）。阶段 9（Skill 安装器）暂停，本阶段不引入其安装测试；待阶段 9 启动后再补充。
+- **修改范围**：根 `tests/{cli,mcp,hosts,skills}`、CI workflows 和发布验证脚本。
+- **具体任务**：加入 MCP 单元/lifecycle/工具契约、Skill 静态契约、CLI、Host 配置、重复安装、冲突保护、三平台、Node 矩阵、Registry schema 和版本一致性验证。测试统一从根 `tests/` 通过稳定相对路径导入根 `dist/`（例如 `../../dist/cli/...`、`../../dist/mcp/...`）；MCP stdio smoke 从薄 `bin/pi-task-exec.mjs` 启动 `mcp serve`。
+- **验收条件**：PR CI 无发布凭据、不自动发布；Node 版本、OS 和本地目录使用隔离环境；所有矩阵可重复；既有测试语义逐项保留（迁移前基线为 141 项，不因移动/拆分文件或改 import 而删减覆盖）。
 - **回滚方式**：回退 workflow/测试；禁止为了绿灯跳过关键平台验收。
 - **公开发布影响**：无。
 - **人工决策**：确定 Node 最低版本，建议至少 22；Node 20 已 EOL。
 
 ## 阶段 12：npm tarball 验收
 
-- **前置依赖**：阶段 11 全绿；许可证已确认。
+- **前置依赖**：阶段 11 全绿；许可证已确认；2026-10-09 根级目录重构完成。
 - **修改范围**：仅临时构建目录与候选包。
-- **具体任务**：执行 npm pack 到临时目录；检查文件清单；在干净临时 prefix 安装 tarball；从该安装目录调用真实 bin，运行 `pi-task-exec mcp serve` 的启动 smoke test；检查 Skill 可安装、依赖可解析、MCP stdio 可初始化并返回工具列表。核对 Registry `packageArguments` 逐项等于实际 CLI 参数 `mcp serve`。
-- **验收条件**：MCP 和 Skill 均在 tarball 中；运行时代码中没有旧产品名称；`package.json`、`server.json`、bin 和当前安装说明中没有旧名称；tarball 不包含旧 CLI 入口、旧 bin、旧 package metadata 或旧 Registry metadata。README 的迁移历史可以保留旧项目名作为历史来源说明，不将这类历史说明判作运行时残留。已安装 tarball 中的真实 `pi-task-exec mcp serve` 成功启动 MCP；无参数不会启动服务；Registry 启动参数与通过测试的 CLI 契约完全一致。
+- **具体任务**：执行 npm pack 到临时目录；检查文件清单；在干净临时 prefix 安装 tarball；从该安装目录调用真实薄 `bin/pi-task-exec.mjs`，运行 `pi-task-exec mcp serve` 的启动 smoke test；检查 Skill 可安装、依赖可解析、MCP stdio 可初始化并返回工具列表。核对 Registry `packageArguments` 逐项等于实际 CLI 参数 positional `mcp`、`serve`，且 `server.json` 不再包含 `repository.subfolder: "mcp"`。不依赖源码 checkout、npm link、`mcp/dist` 或开发机配置。
+- **验收条件（选型 A 目标布局）**：tarball 包含根 `dist/**`（`dist/cli/index.js`、`dist/mcp/index.js` 等）、薄 `bin/`、完整 `skills/pi-delegate/**`（含 `SKILL.md` 与 references）、必要根文档、根 LICENSE 与根 `server.json`，npm 自动带根 `package.json`；不包含 `mcp/src/`、`mcp/tests/`、`mcp/dist/`、`mcp/README.md`、`mcp/LICENSE`、根 `tests/`、源码、node_modules、架构草稿或旧输出；不使用 npm Workspaces，不使用 `mcp/tsconfig.json`。运行时代码中没有旧产品名称；`package.json`、`server.json`、薄 bin 和当前安装说明中没有旧名称。README 的迁移历史可以保留旧项目名作为历史来源说明，不将这类历史说明判作运行时残留。已安装 tarball 中的真实 `pi-task-exec mcp serve` 成功启动 MCP；无参数不会启动服务；Registry 启动参数与通过测试的 CLI 契约完全一致。六个 `pi_*` 工具名在阶段 10 完成后应已全部改为 `task_*`；若仍为 `pi_*`，不得进入本阶段。
 - **回滚方式**：丢弃未发布 tarball 和临时目录；修复后重新验收。
 - **公开发布影响**：无。
 - **人工决策**：Supervisor 最终包清单审阅。
@@ -146,8 +149,8 @@
 
 - **前置依赖**：阶段 1 确认 ID 空闲/namespace 权限；阶段 13 npm 已成功；`server.json` validate 通过。
 - **修改范围**：官方 MCP Registry 新记录。
-- **具体任务**：以根 `server.json` 发布 `io.github.zguiyang/pi-task-exec`；检查 `mcpName`、npm identifier、版本、repository URL/subfolder 和 stdio 启动参数。`packages[].packageArguments` 必须与通过 tarball smoke test 的 `pi-task-exec mcp serve` 参数完全一致，即 positional arguments `mcp`、`serve`，不得省略、换序或使用未经测试的参数。
-- **验收条件**：官方 Registry 返回该精确新 ID 和版本，包元数据对应 npm 公开版本；Registry 启动参数与公开 npm tarball 中真实 CLI 的启动入口一致。
+- **具体任务**：以根 `server.json` 发布 `io.github.zguiyang/pi-task-exec`；检查 `mcpName`、npm identifier、版本、repository URL 和 stdio 启动参数。**必须从 `server.json` 移除 `repository.subfolder: "mcp"`**（本仓库是单一产品根，而非 MCP 子项目），并确认该字段不再出现在发布记录中。`packages[].packageArguments` 必须与通过 tarball smoke test 的 `pi-task-exec mcp serve` 参数完全一致，即 **保持 positional arguments `["mcp", "serve"]`**，不得省略、换序、改为 flag 或使用未经测试的参数。
+- **验收条件**：官方 Registry 返回该精确新 ID 和版本，包元数据对应 npm 公开版本；发布记录中无 `repository.subfolder: "mcp"`；Registry 启动参数为 positional `["mcp", "serve"]`，与公开 npm tarball 中真实 CLI 的启动入口一致。
 - **回滚方式**：如发布内容错误，暂停推广并按 Registry 支持流程更正或标记状态；名称不能通过新版本改名，禁止回退旧 ID。
 - **公开发布影响**：是，必须人工授权。
 - **人工决策**：明确 Registry 发布批准。
@@ -174,17 +177,33 @@
 
 ## 2026-10-09 目录重构审查与迁移计划
 
-### 当前只读审查结论
+> **本节是 2026-10-09 根级目录决策（选型 A）的当前执行计划，是阶段 1–8 旧路径描述之后的权威来源。**
+
+### 迁移前只读审查结论（历史快照）
+
+> **历史/非规范：** 以下“当前”均为选型 A 实施前的过渡状态快照，仅用于记录迁移起点，已被本节后续目标布局取代。
 
 阶段 8 的提交为 `d996b2f`（本地 `main`，用户说明尚未推送），工作区检查干净。阶段 9 尚未开始。当前运行时代码、包配置仍采用迁移过渡结构：`mcp/src/` 同时容纳 CLI、Host 安装器和 MCP runtime，测试在 `mcp/tests/`，TypeScript 输出在 `mcp/dist/`。`mcp/src/index.ts` 同时构建 CLI 依赖、路由参数并注册 MCP Server/工具，存在双向职责耦合；`mcp/src/cli.ts` 才是 CLI parser/command implementation，Host adapter 和计划/安全执行器也都放在 MCP 模块。
 
 本次 `npm pack --dry-run --ignore-scripts --json` 因 `/Users/joyzhao/.npm` 缓存目录权限错误退出；仓库中未找到 `.tgz`。因此这里只能确认当前 `package.json.files` 声明的包路径，不把历史阶段记录的 tarball 成功当成本次实际 tarball 证据。当前声明包含 `mcp/dist/**`、Skill、根 README、MCP README、根/MCP LICENSE、`server.json`；npm 自动带根 `package.json`。当前已忽略的 `mcp/dist/` 含 `.js`、`.d.ts`、`.js.map`，含 `hosts/` 子目录。不得把这份路径清单误称为重新解包验证。
 
-当前按 manifest 推导的 tarball 文件树为：`package/package.json`、`package/README.md`、`package/LICENSE`、`package/server.json`、`package/mcp/README.md`、`package/mcp/LICENSE`、`package/mcp/dist/{adapters,cli,doctor,executor,identity,index,io,pi-rpc,plan,safety,skill,types,worker-manager}.{js,d.ts,js.map}`、`package/mcp/dist/hosts/{codex,jsonc,opencode,shared,toml,zed}.{js,d.ts,js.map}`，以及 `package/skills/pi-delegate/SKILL.md`、`package/skills/pi-delegate/references/mcp-contract.md`。根 `package-lock.json`、tests、源码和 node_modules 不在当前 `files` 清单中。此树是 manifest + 当前 ignored dist 的路径推导；本次未能重新 pack 解包确认。
+当前按 manifest 推导的 tarball 文件树（迁移前历史）为：`package/package.json`、`package/README.md`、`package/LICENSE`、`package/server.json`、`package/mcp/README.md`、`package/mcp/LICENSE`、`package/mcp/dist/{adapters,cli,doctor,executor,identity,index,io,pi-rpc,plan,safety,skill,types,worker-manager}.{js,d.ts,js.map}`、`package/mcp/dist/hosts/{codex,jsonc,opencode,shared,toml,zed}.{js,d.ts,js.map}`，以及 `package/skills/pi-delegate/SKILL.md`、`package/skills/pi-delegate/references/mcp-contract.md`。根 `package-lock.json`、tests、源码和 node_modules 不在当前 `files` 清单中。此树是迁移前 manifest + 旧 ignored dist 的路径推导；本次未能重新 pack 解包确认。
 
-### 当前路径到建议终态的迁移映射
+### 选型 A 目标 tarball 预测（待真实 pack 解包核验）
 
-| 当前路径 | 建议终态 | 操作及关联更新 |
+迁移并重新构建后，根 npm `files` 只允许包含以下路径；npm 自动带根 `package.json`：
+
+- `package/package.json`
+- `package/README.md`、`package/LICENSE`、`package/server.json`
+- `package/bin/pi-task-exec.mjs`（薄启动器，仅调用 `../dist/cli/index.js`）
+- `package/dist/**`：至少 `dist/cli/index.js`（CLI，含 `dist/cli/commands/`、`dist/cli/hosts/`、`dist/cli/installers/`、`dist/cli/plan/`）与 `dist/mcp/index.js`（MCP Server，含 `dist/mcp/tools/`、`dist/mcp/workers/`、`dist/mcp/rpc/`、`dist/mcp/runtime/`）
+- `package/skills/pi-delegate/SKILL.md`、`package/skills/pi-delegate/references/mcp-contract.md`
+
+必须排除：`mcp/src/`、`mcp/tests/`、`mcp/dist/`、`mcp/README.md`、`mcp/LICENSE`、`mcp/tsconfig.json`、根 `tests/`、根源码、架构草稿、`node_modules`、旧输出与开发机配置。`server.json` 不得再包含 `repository.subfolder: "mcp"`，`packageArguments` 保持 positional `["mcp", "serve"]`。此预测仍须在第 12 阶段以重新构建的真实 `.tgz` 解包核验，不得以本清单代替验收。
+
+### 迁移前路径到选定终态（选型 A）的迁移映射
+
+| 迁移前路径 | 选定终态（选型 A） | 操作及关联更新 |
 |---|---|---|
 | `package.json` | `package.json` | 保留唯一根 manifest；调整 `bin`、`files`、build/test/typecheck/start/prepack scripts，不使用 Workspaces |
 | `package-lock.json` | `package-lock.json` | 保持根级唯一锁文件；无 workspace 结构 |
@@ -235,9 +254,9 @@
 
 当前相对 TS imports 均为模块内 `./`、`../` 路径，移动到 `cli/` 或 `mcp/` 后需按新层级逐一修正；测试统一由 `tests/` 导入根 `dist/`。另更新 README 文本中所有 `mcp/dist/index.js`、`mcp/src`、`mcp/tests` 路径。当前 package `bin` 指向 `./mcp/dist/index.js`；scripts 的 build/typecheck 指向 `mcp/tsconfig.json`，test 指向 `mcp/tests/*.test.mjs`，start 运行 `mcp/dist/index.js`；`files` 包含 `mcp/dist/**` 和 `mcp/README.md`。这些路径必须全部迁到根 `dist/` 和根 tests。`server.json` 的 `packageArguments` 值无需更改，只需核对启动入口与去除已无意义的 subfolder。
 
-#### 当前相对导入/路径引用清单
+#### 迁移前相对导入/路径引用清单（迁移起点，非当前指令）
 
-下面列出源码中的全部相对 TS import specifier，以及测试直接导入/启动的编译路径；`node:` 和第三方依赖不属于仓库内相对导入。搬移后所有导入需按归属与新目录重算，测试只允许指向根 `dist/`，不允许再穿越到 `mcp/dist/`。
+> **历史/非规范：** 下表逐项列出迁移前的相对导入，仅作为选型 A 迁移的起点清单，不构成当前路径指令。搬移后所有导入需按归属与新目录重算，测试只允许指向根 `dist/`，不允许再穿越到 `mcp/dist/`。
 
 | 当前文件 | 当前相对引用 | 终态处理 |
 |---|---|---|
@@ -287,4 +306,4 @@
 | 12. 删除旧目录 | 删除 `mcp/src/`、`mcp/tests/`、`mcp/dist/`、旧 tsconfig/重复文档 | `rg` 无旧路径依赖；不留兼容 wrapper；完整回归通过 | 从该阶段提交回滚；根新结构仍保留 | 源包规则不变；旧路径消失 | 目录验收完成后解锁 |
 | 13. 提交并推送 | 仅提交审查完成的迁移文件并推送授权分支 | diff、测试、tarball、文档和提交范围由 Supervisor 审阅 | revert commit；不做 force push | 若此前 tarball已验收则布局稳定 | 完成后独立启动阶段 9 |
 
-任何阶段都不得改变命令契约、adapter interface、scope、安全安装行为、六个现有 MCP tools 或 Skill 根源路径；不得以“兼容”为由保留 `mcp/src`、`mcp/tests` 或 `mcp/dist`。本审查阶段只更新架构文档，不实施上述迁移，不运行 build/test/pack，不提交或推送。
+目录迁移保持命令契约、adapter interface、scope、安全安装行为、六个现有 MCP tools 及 Skill 根源路径；不得以“兼容”为由保留 `mcp/src`、`mcp/tests` 或 `mcp/dist`。旧 `mcp/src`、`mcp/tests`、`mcp/dist` 路径只作为迁移起点记录；完成构建与完整验收前不得删除。阶段 9 Skill 安装器保持暂停，须在根级目录迁移和真实 tarball 验收完成后另行启动。

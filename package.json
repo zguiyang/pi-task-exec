@@ -9,23 +9,22 @@
     "node": ">=20"
   },
   "bin": {
-    "pi-task-exec": "./mcp/dist/index.js"
+    "pi-task-exec": "./bin/pi-task-exec.mjs"
   },
   "files": [
-    "mcp/dist/**",
+    "dist/**",
+    "bin/**",
     "skills/pi-delegate/**",
     "README.md",
-    "mcp/README.md",
     "LICENSE",
-    "mcp/LICENSE",
     "server.json"
   ],
   "scripts": {
-    "build": "tsc -p mcp/tsconfig.json",
-    "typecheck": "tsc --noEmit -p mcp/tsconfig.json",
-    "test": "npm run build && node --test --test-concurrency=1 mcp/tests/*.test.mjs",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "npm run build && node --test --test-concurrency=1 tests/*/*.test.mjs",
     "prepack": "npm run build",
-    "start": "node mcp/dist/index.js mcp serve"
+    "start": "node bin/pi-task-exec.mjs mcp serve"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.0.0",
