@@ -16,14 +16,16 @@ status/result → Supervisor review and acceptance. `inspect`/`implement` are
 tool capability profiles and `direct`/`worktree` are working-directory modes;
 neither is an operating-system security sandbox.
 
-> Status: Phases 6–8 have been implemented in this checkout. Stage 8 adds real
-> Codex, Zed, and OpenCode MCP install/remove with safe TOML/JSONC merging,
-> backups, and managed-entry removal. The 2026-10-09 root-level directory
-> decision (layout A: root `cli/`, `mcp/`, `skills/`, `tests/`, `docs/`, and a
-> root `dist/`) is approved; this README describes that target layout. Stage 9
-> (the generic `.agents/skills/` installer) and stage 10 (MCP/Skill contract
-> synchronization and tool renaming) have not started. The npm package and MCP
-> Registry entry have not been published. For current development, build from
+> Status: Phases 6–8 and the 2026-10-09 root-level directory refactor (layout
+> A: root `cli/`, `mcp/`, `skills/`, `tests/`, `docs/`, and root `dist/`) are
+> implemented in this checkout. Stage 8 adds real Codex, Zed, and OpenCode MCP
+> install/remove with safe TOML/JSONC merging, backups, and managed-entry
+> removal. Stage 9 (the generic `.agents/skills/` installer) and stage 10
+> (MCP/Skill contract synchronization and tool renaming) have not started. The
+> npm package and MCP Registry entry have not been published. Local tarball
+> prepack, archive-content checks, and a separate clean npm prefix installation
+> with full MCP initialize/list-tools smoke have passed for the current `pi_*`
+> contract. For current development, build from
 > source and run `node dist/cli/index.js mcp serve`; `dist/` is generated
 > output from `cli/` and `mcp/`. When run from this checkout the installer
 > writes a `node <absolute-checkout>/dist/cli/index.js mcp serve` launch entry
@@ -270,7 +272,7 @@ output all live under the root.
 | `cli/` | CLI parser/router, commands, host install adapters (`cli/hosts/`), installer seam (`cli/installers/`), plan model and safety executor (`cli/plan/`), and CLI identity/IO. |
 | `mcp/` | MCP server entry, tools, workers, Pi RPC, and runtime. Does not import the CLI. |
 | `skills/pi-delegate/` | The `pi-delegate` delegation-policy Skill and its `references/`. Maintained by JoeyZhao in the `agent-skills` project. |
-| `tests/` | Unified tests under `tests/cli/`, `tests/mcp/`, and `tests/hosts/`, with MCP fixtures under `tests/mcp/fixtures/`. |
+| `tests/` | Unified tests under `tests/cli/`, `tests/mcp/`, `tests/hosts/`, and `tests/skills/`, with MCP fixtures under `tests/mcp/fixtures/`. |
 | `docs/architecture/` | Architecture decision record, implementation plan, and risk register for the migration. |
 | `docs/release-standard-baseline.md` | Release standard baseline and distribution contract. |
 | `dist/` | Generated build output: `dist/cli/index.js` (CLI) and `dist/mcp/index.js` (MCP Server). Intentionally not tracked. |
@@ -281,8 +283,9 @@ output all live under the root.
 
 The root `package.json`, `package-lock.json`, and `server.json` carry the
 product identity. Phase 6 CLI routing and the integrated test suite are
-verified; public npm publication and stage 12 tarball acceptance remain
-pending.
+verified. The root-level directory refactor is implemented. Public npm
+publication remains pending, and stage 12 tarball acceptance is not complete
+until installation in a clean npm prefix and the full MCP stdio smoke pass.
 
 ## Development, contributing, and releases
 
@@ -303,7 +306,9 @@ npm start            # node bin/pi-task-exec.mjs mcp serve
 - `start` runs the compiled CLI `mcp serve` route through the thin
   `bin/pi-task-exec.mjs` launcher; it is the same service-start contract used by
   host configuration and the Registry entry.
-- `prepack` rebuilds the root `dist/` before packaging.
+- `build` clears only the repository-root `dist/` before compiling, so stale
+  JavaScript, declarations, or source maps cannot survive into a package;
+  `prepack` uses this same build path.
 
 Tests import the root `dist/` through stable relative paths (for example
 `../../dist/cli/...` and `../../dist/mcp/...`). The MCP stdio smoke test starts

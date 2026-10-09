@@ -70,9 +70,9 @@ Pi TaskExec 是供主 Agent 调用的 MCP 调度、连接和执行控制层，�
 
 根 npm 包的 `files` 至少包括 `mcp/dist/**`、`skills/pi-delegate/**`、根 README、MCP README、最终确认的 LICENSE/NOTICE 和 `server.json`。不打入测试、node_modules、本机 `.codex` 配置或无关架构草稿。npm 包安装后应同时包含可运行 MCP 和完整 Skill 目录。
 
-现有 `mcp/tsconfig.json` 的 `rootDir: "src"`、`outDir: "dist"` 都以 tsconfig 所在目录为基准；在 `mcp/tsconfig.json` 不移动的前提下，根脚本运行 `tsc -p mcp/tsconfig.json`，仍生成 `mcp/dist/`。测试当前以 `mcp/tests/*.test.mjs` 相对导入 `mcp/dist/`；根 test 脚本应先构建，再运行 `node --test --test-concurrency=1 mcp/tests/*.test.mjs`。必须在临时目录通过 npm tarball 实测这些相对路径。
+迁移前，`mcp/tsconfig.json` 的 `rootDir: "src"`、`outDir: "dist"` 都以 tsconfig 所在目录为基准；在 `mcp/tsconfig.json` 不移动的前提下，根脚本运行 `tsc -p mcp/tsconfig.json`，仍生成 `mcp/dist/`。当时测试以 `mcp/tests/*.test.mjs` 相对导入 `mcp/dist/`；根 test 脚本应先构建，再运行 `node --test --test-concurrency=1 mcp/tests/*.test.mjs`。迁移前要求在临时目录通过 npm tarball 实测这些相对路径。
 
-`prepack` 可构建 `mcp/dist/`；`files` 需包含 Skill 原目录。`dist/` 作为生成物由 build/prepack 生成；当前迁入的 `dist/` 不在本阶段删除。根包不增加 `main`/`exports`，除非明确决定对外支持程序化导入 API。
+迁移前 `prepack` 可构建 `mcp/dist/`；`files` 需包含 Skill 原目录。`dist/` 作为生成物由 build/prepack 生成；当时迁入的 `dist/` 不在该阶段删除。根包不增加 `main`/`exports`，除非明确决定对外支持程序化导入 API。
 
 ## 5. CLI 决策
 
@@ -185,9 +185,9 @@ Phase 2 已从本新仓库删除 `mcp/.codex/config.toml`：该文件含旧 chec
 
 ## 13. 2026-10-09 目录边界复审（覆盖第 3、4 节旧布局与 `mcp` subfolder 决策）
 
-**状态：已批准选型 A（根级布局），目录重构尚未实施。** 当前 `mcp/src/`、`mcp/tests/`、`mcp/dist/` 是早期集成阶段的迁移过渡结构，不是最终产品结构；本节取代第 3 节的 `repository.subfolder: "mcp"` 与第 4 节的旧目录/构建描述。阶段 8 的 CLI 与三种 Host adapter 已完成；目录重构前暂停阶段 9（Skill 安装器），不得把阶段 9 与目录迁移混做一个变更。
+**状态：选型 A（根级布局）已实施。** 本节记录已完成的根级结构及其依据，并取代第 3 节的 `repository.subfolder: "mcp"` 与第 4 节的旧目录/构建描述。早期 `mcp/src/`、`mcp/tests/`、`mcp/dist/` 仅为迁移历史路径，不是当前运行结构。阶段 9（Skill 安装器）尚未开始；本轮收尾验收后交由 Supervisor 审查是否启动，不与目录迁移混做。
 
-产品由一个根 npm 包、一个 CLI 入口、MCP Server 和 Skill 组成。根目录统一管理 CLI、MCP、Skill、测试和文档；不使用 npm Workspaces。最终边界为：
+产品由一个根 npm 包、一个 CLI 入口、MCP Server 和 Skill 组成。根目录统一管理 CLI、MCP、Skill、测试和文档；不使用 npm Workspaces。当前边界为：
 
 ```text
 .
@@ -213,17 +213,17 @@ Phase 2 已从本新仓库删除 `mcp/.codex/config.toml`：该文件含旧 chec
 
 ### 根构建、入口和分发
 
-- 根 TypeScript 配置从 `cli/**/*.ts` 与 `mcp/**/*.ts` 编译到根 `dist/`。建议 `rootDir: "."`、`outDir: "dist"`，显式 include 两个源码目录，并排除 `tests/`、`dist/`、`node_modules/`。
+- 根 TypeScript 配置从 `cli/**/*.ts` 与 `mcp/**/*.ts` 编译到根 `dist/`。根 `tsconfig.json` 使用 `rootDir: "."`、`outDir: "dist"`，显式 include 两个源码目录，并排除 `tests/`、`dist/`、`node_modules/`。
 - 编译产物固定为 `dist/cli/index.js`（CLI）和 `dist/mcp/index.js`（MCP Server）。CLI 的 `mcp serve` 路由调用 MCP 启动函数；MCP 模块不反向导入 CLI。正常 CLI 命令不初始化 MCP runtime。
 - `bin/pi-task-exec.mjs` 只导入/调用 `../dist/cli/index.js`；根 `package.json.bin` 指向薄入口。checkout 启动参数改为 `node <checkout>/dist/cli/index.js mcp serve`；npm 安装参数仍为 `npx -y @zguiyang/pi-task-exec@<version> mcp serve`。
-- 根 `build`/`prepack` 生成根 `dist/`；不再生成或读取 `mcp/dist/`。根 `.gitignore` 忽略 `dist/`。
+- 根 `build`/`prepack` 先清理根 `dist/`，再生成完整根级编译产物；不再生成或读取 `mcp/dist/`。根 `.gitignore` 忽略 `dist/`。临时副本污染测试曾确认旧文件会被原 `tsc` 构建保留并打包；现有 `build` 已增加跨平台 Node 内置清理步骤，修复后的污染重测证据记录在风险登记表 R39。
 - `server.json` 仍在根目录；`packageArguments` 保持 positional `mcp`、`serve`。由于仓库是单一产品根而非 MCP 子项目，`repository.subfolder: "mcp"` 应移除。版本、npm identifier、Registry ID 约束不变。
-- npm `files` 只允许打入根 `dist/**`、薄 `bin/`、完整 `skills/pi-delegate/**`、必要根文档、许可证和 `server.json`；npm 自动带根 `package.json`。移除 `mcp/dist/**`、`mcp/README.md`、`mcp/LICENSE` 等过渡路径。排除 tests、源码、架构草稿、node_modules 和旧输出。
-- tarball 接受须针对重新构建的真实 `.tgz` 解包核验：`bin` 可运行，CLI help/version 正常，`mcp serve` 可启动，Skill 的 `SKILL.md` 与 references 完整。
+- npm `files` 包含根 `dist/**`、薄 `bin/`、完整 `skills/pi-delegate/**`、必要根文档、许可证和 `server.json`；npm 自动带根 `package.json`。不含 `mcp/dist/**`、`mcp/README.md`、`mcp/LICENSE`、tests、源码、架构草稿、node_modules 或旧输出。
+- 真实 tarball 验收分开记录包文件内容/解包检查与干净 npm prefix 安装后的完整 MCP stdio smoke；当前 73 文件 tarball 的实际解包检查及安装后 CLI/MCP initialize/list-tools 均已通过。阶段 12 仍受其原定阶段 11 与阶段 10 契约迁移前置条件约束，本轮证据不改变该计划范围。
 
 ### 测试约定
 
-- 根 `npm test` 先构建，再运行根 `tests/`；现有测试逐项语义不变，目标仍为 141 项，不因移动、拆文件或改 import 而删减覆盖。
+- 根 `npm test` 先构建，再运行根 `tests/`；迁移前基线为 141 项。本轮根布局回归实际为 142 项，测试源码扫描未发现 skip、todo 或 only。
 - 测试从 `tests/` 通过稳定相对路径导入根 `dist/`，例如 `../../dist/cli/...`、`../../dist/mcp/...`。fake adapters 用于计划、冲突和隔离写入测试；真实 Codex、Zed、OpenCode adapters 仍使用临时 home/cwd 与 mock 环境验证格式、路径、指纹、备份/回滚。
 - MCP smoke test 从薄 `bin/` 启动 `mcp serve`，经 stdio 执行 initialize/list-tools，确认六个现有 `pi_*` 工具和 JSON-RPC 响应。fake Pi 与真实 adapter 的测试边界不变。
 - tarball smoke 在临时目录解包或从压缩包运行，不依赖源码 checkout、npm link、`mcp/dist` 或开发机配置。

@@ -46,24 +46,24 @@
 
 仍待完成、维持未验证的发布前工作：
 
-4. Windows Host 配置路径和跨平台 CI 尚未实施或验证。
-5. `task_*` 工具契约、根 package 构建路径和 tarball 内容尚未实现、测试。
+4. Windows Host 配置路径虽有 win32 路径单测，但真实 Windows 环境与完整跨平台 CI 尚未验证。
+5. `task_*` 工具契约迁移按阶段 10 保持未开始；根 package 构建、tarball 文件清单及干净 prefix 安装/MCP smoke 已在本轮分别验收。
 6. 尚无任何 npm 包或 Registry 记录实际发布；发布需单独人工授权并再次核对官方状态。
 
 ## 2026-10-09 目录重构风险补充
 
-当前目录是迁移过渡结构，不代表最终产品边界。阶段 9 必须等待本目录重构完成、根级测试通过及真实 tarball 验收后再开始。
+**状态说明：** R31–R39 的“已解决”表示本轮指定的结构或打包失效模式已有当前代码与验收证据；“已缓解”表示控制措施已落实但对应后续阶段尚未执行；“待验证”表示环境或证据不足以确认；“仍存在”表示问题当前可复现且尚未修复。以下旧风险描述保留原有分析，状态与当前证据以新增列为准。
 
-| ID | 风险 | 影响 | 当前证据/可能性 | 预防与验收 | 回滚/应对 |
+| ID | 风险 | 影响 | 当前状态与证据 | 预防与验收 | 回滚/应对 |
 |---|---|---|---|---|---|
-| R31 | 把 `mcp/src/index.ts` 原样搬到 `mcp/index.ts`，CLI 仍与 MCP server 初始化耦合 | help/version 初始化 MCP runtime；MCP 模块继续依赖 CLI、Host adapters 和 Skill installer，目录虽变但边界未变 | 高；当前 index 同时构建 CLI deps、路由 `mcp serve` 并注册工具 | 将 CLI 路由、MCP Server/tool registration、stdio lifecycle 拆分；MCP 不导入 CLI；正常 CLI 命令不初始化 runtime | 回退到阶段 2 拆分前，保留上一组可工作的目录提交；不以 wrapper 掩盖耦合 |
-| R32 | Host adapter 或安装计划留在 `mcp/` | MCP runtime 仍承载用户配置写入能力，职责边界和测试归属模糊 | 高；adapter、doctor、plan、executor、safety 当前全在 `mcp/src` | adapter/安装器/计划模型/安全执行器均归 `cli/`；MCP 仅含 server/tools/workers/rpc/runtime；检查 import graph | 还原到最近的完整阶段提交并修正移动映射 |
-| R33 | 单根 TypeScript 编译错误生成双层或多层意外输出 | `bin`、server startup、source maps、tarball 入口不匹配 | 中高；旧 config 的 `rootDir: src` 与 `outDir: dist` 相对 `mcp/tsconfig.json`，旧产物是 `mcp/dist` | 根配置显式输入 `cli/`、`mcp/`，`rootDir: .`、`outDir: dist`；构建后断言 `dist/cli/index.js` 与 `dist/mcp/index.js` | 清理候选生成物并修复 tsconfig/scripts；不发布错误布局 |
-| R34 | CLI 到 MCP 的启动反向依赖或静态耦合扩散 | CLI 普通命令加载 MCP runtime，或 MCP server 依赖 CLI 才能工作 | 中；当前 `mcp/src/index.ts` 静态导入 CLI | 用薄 bin → CLI router → MCP 启动函数的单向关系；明确 MCP 模块可独立构建；help/version smoke 不启动 server | 恢复最后通过 smoke 的入口实现，重做启动边界 |
-| R35 | package `files` 遗留 `mcp/dist`、遗漏根 `dist`/`bin` 或 Skill references | tarball 缺入口或 Skill，或混入过渡产物/测试 | 高；当前 `files` 明确包含 `mcp/dist/**` 与 `mcp/README.md` | 从干净构建验证 tarball 解包清单，断言根 dist、bin、Skill、文档、LICENSE、server.json 均完整，旧 mcp 路径和 tests 不存在 | 丢弃 tarball；修正唯一根 manifest 后重 pack，不发布 |
-| R36 | `server.json` 留着 `repository.subfolder: "mcp"` | Registry 仓库路径把单产品仓库误标为 MCP 子项目 | 中；当前 server metadata 有该字段 | 根仓库定位后删除该字段；`packageArguments` 仍严格为 positional `mcp`、`serve`；schema/CLI smoke 联合验收 | 恢复 metadata 并暂停 Registry 操作，核对规范后再改 |
-| R37 | 移动测试时只保留总数，丢失语义或 fake/real adapter 边界 | 141 项通过的表象掩盖覆盖削弱 | 中高；当前 CLI、Host installer、runtime、worker、security、metadata tests 混放于 `mcp/tests` | 为每项现有断言记录目标文件；fake adapters 继续用于计划/冲突场景，真实 adapters 继续用隔离 home/cwd；根测试先 build | 恢复原测试用例并分模块修正，不得删除失败用例作为迁移手段 |
-| R38 | Skill 安装器阶段 9 在新源码路径稳定前启动 | 安装器引用旧 `mcp/dist`/资源路径，造成重复返工或旧边界继续延长 | 高；Skill 安装仍未实现，当前设计要求包内定位 `skills/pi-delegate/` | 暂停阶段 9；目录重构、141 项回归和真实 tarball验收结束后，以 `skills/pi-delegate/` 为唯一源路径再实施 | 暂停阶段 9并回到已通过的目录重构提交；不保留旧资源路径兼容逻辑 |
-| R39 | 把 ignored `mcp/dist` 当作可迁移的权威产物 | stale JS 与新 source layout 不一致，导致错误测试或打包 | 中高；`mcp/dist` 当前在工作区存在但被忽略；本次 pack dry-run 因 npm cache 权限错误未运行成功，仓库中无 `.tgz` | 不搬运旧 dist；根 build 从源码生成全新 dist；pack 必须由干净构建重新产生并解包核验 | 删除候选 ignored 输出后重新构建；保留源码和 lockfile，不修改 npm cache 权限 |
+| R31 | 把 `mcp/src/index.ts` 原样搬到 `mcp/index.ts`，CLI 仍与 MCP server 初始化耦合 | help/version 初始化 MCP runtime；MCP 模块继续依赖 CLI、Host adapters 和 Skill installer，目录虽变但边界未变 | **已解决。** 当前 CLI 仅在显式 `mcp serve` 路由后动态加载 MCP；源码 MCP 没有 CLI 导入；无参数/help/version smoke 均未启动 MCP。 | 拆分 CLI 路由、MCP Server/tool registration、stdio lifecycle；持续检查边界。 | 回退到阶段 2 拆分前，保留上一组可工作的目录提交；不以 wrapper 掩盖耦合 |
+| R32 | Host adapter 或安装计划留在 `mcp/` | MCP runtime 仍承载用户配置写入能力，职责边界和测试归属模糊 | **已解决。** 当前 Host adapter、doctor、plan、executor、safety 在 `cli/`；MCP 仅含 server/tools/workers/rpc/runtime。 | 持续检查 import graph 与目录归属。 | 还原到最近的完整阶段提交并修正移动映射 |
+| R33 | 单根 TypeScript 编译错误生成双层或多层意外输出 | `bin`、server startup、source maps、tarball 入口不匹配 | **已解决。** 根 tsconfig 的 rootDir/outDir 为 `.`/`dist`；本轮 build 成功并确认根 `dist/cli/index.js`、`dist/mcp/index.js`，真实包也包含二者。 | 构建后检查两个入口；保持根 dist 为唯一输出。 | 清理候选生成物并修复 tsconfig/scripts；不发布错误布局 |
+| R34 | CLI 到 MCP 的启动反向依赖或静态耦合扩散 | CLI 普通命令加载 MCP runtime，或 MCP server 依赖 CLI 才能工作 | **已解决。** 根 CLI 仅在解析为 serve 后动态导入 MCP；`mcp/` 无 CLI 源导入；无参数和 help 实测没有 MCP 启动标记；独立包 MCP smoke 通过。 | 保持薄 bin → CLI router → MCP 单向启动关系。 | 恢复最后通过 smoke 的入口实现，重做启动边界 |
+| R35 | package `files` 遗留 `mcp/dist`、遗漏根 `dist`/`bin` 或 Skill references | tarball 缺入口或 Skill，或混入过渡产物/测试 | **已解决。** 隔离缓存 `npm pack` 生成真实 73 文件 `.tgz`；解包含 bin、两个根 dist 入口、Skill 与 reference、README、LICENSE、server.json；没有源码、测试、旧路径或无关文件。干净 prefix 安装后 help/version、MCP initialize/list-tools 均通过，六工具名符合当前契约。 | 每次发布候选仍须按真实 `.tgz` 与干净 prefix 验收，不以 manifest 推测。 | 丢弃 tarball；修正唯一根 manifest 后重 pack，不发布 |
+| R36 | `server.json` 留着 `repository.subfolder: "mcp"` | Registry 仓库路径把单产品仓库误标为 MCP 子项目 | **已解决。** 当前 server metadata 与打包文件未含 `repository.subfolder: "mcp"`；packageArguments 仍为 positional `mcp serve`，metadata test 通过。 | 发布前继续执行 Registry schema 与 CLI 参数一致性检查。 | 恢复 metadata 并暂停 Registry 操作，核对规范后再改 |
+| R37 | 移动测试时只保留总数，丢失语义或 fake/real adapter 边界 | 测试数表象掩盖覆盖削弱 | **已解决。** `npm test` 142 pass、0 fail、0 skipped、0 todo；测试源中无 skip/todo/only 标记；fake Pi 与隔离 Host adapter 测试均执行通过。 | 后续重构保留本轮基线和测试边界。 | 恢复原测试用例并分模块修正，不得删除失败用例作为迁移手段 |
+| R38 | Skill 安装器阶段 9 在新源码路径稳定前启动 | 安装器引用旧路径，造成返工或旧边界延长 | **已缓解。** Skill 唯一源 `skills/pi-delegate/` 与 references 已打入并从干净 prefix 安装包验证；根布局、回归和 MCP smoke 已验收。阶段 9 仍未开始，等待 Supervisor 审查后按原范围启动。 | 阶段 9 只从根 Skill 路径实施；本轮未提前实现 installer。 | 暂停阶段 9并回到已通过的目录重构提交；不保留旧资源路径兼容逻辑 |
+| R39 | 把 ignored `mcp/dist` 当作可迁移的权威产物，或根 build 保留陈旧输出 | stale JS/声明/source map 与源码不一致并被打包 | **已解决。** 前修复临时副本复现 stale JS 被保留并进入 74 文件包；修复后重跑时 stale JS、`.d.ts`、`.js.map` 在 build 后均消失，tarball 为 73 文件且不含 stale 文件。 | `build` 先通过 Node 内置 fs API 仅清理根 `dist/`，再 `tsc`；`prepack` 调用该可靠 build。 | 在根目录重新 clean build/pack；不碰源码或其它目录 |
 
-在阶段 11 真实 tarball 验收之前，当前 `files` 只能用于推断声明包路径，不能作为已验证实际包文件清单。任何验收被 npm cache 或环境权限阻断时，记录为未验证并换用授权的临时缓存/干净环境；不得把历史 tarball 结果代替本次新布局证据。
+迁移前的真实 tarball 失败记录只属于旧 checkout。当前真实 `.tgz` 已在隔离 npm cache 中 pack、解包和检查；干净 npm prefix 安装及 MCP initialize/list-tools smoke 也已通过。两类证据分别记录：文件清单证明包内包含/排除路径，prefix smoke 证明已安装包的依赖解析、CLI 和 MCP 启动契约。
