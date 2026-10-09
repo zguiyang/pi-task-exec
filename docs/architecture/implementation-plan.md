@@ -1,9 +1,9 @@
 # Pi TaskExec 实施计划
 
-状态：阶段 1–5 已完成；阶段 6 已完成，待 Supervisor 审查；阶段 7 已完成，待 Supervisor 审查（提交 `bba829b`）；阶段 8、9、10 未开始；npm 和 MCP Registry 均未发布。
+状态：阶段 1–5 已完成；阶段 6 已完成，待 Supervisor 审查；阶段 7 已完成，待 Supervisor 审查（提交 `bba829b`）；阶段 8 已在本 checkout 实现，待 Supervisor 审查；阶段 9、10 未开始；npm 和 MCP Registry 均未发布。
 日期：2026-10-09
 
-本计划按依赖顺序执行。任何阶段均不得越过公开发布门槛；Registry ID 冲突时停止，不回退旧名称。阶段 1–6 已完成，阶段 6、7 待 Supervisor 审查；后续阶段仍须单独遵守其授权和发布门槛。
+本计划按依赖顺序执行。任何阶段均不得越过公开发布门槛；Registry ID 冲突时停止，不回退旧名称。阶段 1–8 已完成，阶段 6、7、8 待 Supervisor 审查；后续阶段仍须单独遵守其授权和发布门槛。
 
 ## 阶段 1：许可证和命名验证
 
@@ -90,6 +90,7 @@
 - **回滚方式**：恢复备份中的原文件；测试使用隔离 home/cwd，不触碰真实用户配置。
 - **公开发布影响**：无。
 - **人工决策**：Host/平台的支持边界；若某组合不可验证，明确不支持。
+- **执行状态（2026-10-09）**：已实现 Codex、Zed、OpenCode 的真实安装/移除适配器（`mcp/src/hosts/`）。路径解析：Codex 用户级遵循 `$CODEX_HOME`，否则 `~/.codex/config.toml`，项目级 `.codex/config.toml`；Zed 用户级：macOS/Linux 遵循 `$XDG_CONFIG_HOME/zed/settings.json`，否则 `~/.config/zed/settings.json`；Windows 使用 `%APPDATA%\Zed\settings.json`（按平台使用 win32 路径语义），项目级 `.zed/settings.json`；OpenCode 用户级遵循 `OPENCODE_CONFIG`，否则 `OPENCODE_CONFIG_DIR`/`$XDG_CONFIG_HOME` 下的 `opencode.json`，项目级 `opencode.json`；受支持的文件名仅为官方 `opencode.json`/`opencode.jsonc`，不再考虑 `config.json`。格式：Codex 使用 TOML parser（`smol-toml`）校验加字符级表区域扫描，保留无关 section、值与注释；Zed/OpenCode 使用 `jsonc-parser` 做保注释、保留无关字段的最小编辑，无法安全解析时拒绝写入。OpenCode 采用稳定 schema `mcp.<name>`、`type: "local"`、`command` 数组，不使用 `mcp.servers`。安装/移除基于严格的 pi-task-exec 受管指纹：仅当现有条目与本次将要写入的条目逐字段完全一致时才是幂等；旧版本、不同本地路径、额外或被修改的字段均为指纹漂移，add 报冲突且绝不覆盖，remove 报冲突且绝不删除。真实写入复用阶段 7 执行器与安全原语（绝对路径、根边界与符号链接保护、同目录临时文件加原子 rename、写入前备份、失败回滚）。npm 安装模式为默认，启动为 `npx -y @zguiyang/pi-task-exec@<version> mcp serve`；源码 checkout 模式必须显式传入 `--local-dev`，否则计划报 `local_dev_required` 且不写入，写入值为 `node <绝对 checkout>/mcp/dist/index.js mcp serve`，均以结构化 argv 传递、不经过 shell。真实 `.git` checkout 检测优先于 `PI_TASK_EXEC_LAUNCH_MODE`：存在 `.git` 时不能被强制为 npm 模式，避免把未发布的 checkout 表示成已发布的 npx 包；`--local-dev` 仍是写入本地 node 路径的唯一入口。项目级计划与 doctor 明确提示 Codex trusted project 与 Zed Restricted Mode 不会由本工具授予。计划 JSON/文本与 doctor 输出 host/platform、绝对配置路径、配置格式、被修改的配置 key、支持状态、备份策略、重启与 trust 要求；doctor 另报告解析状态与受管/指纹漂移状态，均不输出文件内容。绝对 `CODEX_HOME`/`OPENCODE_CONFIG`/`OPENCODE_CONFIG_DIR`/`XDG_CONFIG_HOME` 覆盖被视为用户显式选择并加入执行 roots，避免通用 path_escape 失败。已新增 TOML/JSONC 与三 Host 适配器测试（隔离临时 home/cwd 与 mock 环境变量，不触碰真实用户配置）；`npm test`、`npm run build`、`npm run typecheck`、`npm pack --dry-run --json` 均通过。未发布 npm/Registry，未改动 MCP 工具名/schema 与 Worker 运行时。
 
 ## 阶段 9：通用 .agents/skills 安装器
 

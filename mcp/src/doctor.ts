@@ -3,7 +3,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { DoctorCheck, HostAdapter } from "./adapters.js";
 import type { HostContext, Scope } from "./plan.js";
-import { skillTargetDir } from "./plan.js";
+import { skillTargetDir, resolveLaunchSpec } from "./plan.js";
 import type { SkillInstaller } from "./skill.js";
 import { PACKAGE_NAME, SERVER_NAME, SKILL_NAME, VERSION } from "./identity.js";
 
@@ -185,6 +185,7 @@ export async function runDoctor(deps: DoctorDependencies): Promise<DoctorReport>
   ];
 
   const hosts: DoctorCheck[] = [];
+  const { launch } = resolveLaunchSpec({ packageRoot: deps.packageRoot, packageVersion: deps.packageVersion, env: context.env });
   for (const adapter of deps.adapters) {
     const scopes: Scope[] = adapter.supportedScopes.length > 0 ? [...adapter.supportedScopes] : ["project", "global"];
     for (const scope of scopes) {
@@ -204,7 +205,7 @@ export async function runDoctor(deps: DoctorDependencies): Promise<DoctorReport>
         hosts.push({ id: `host.${adapter.id}.${scope}`, label: `${adapter.displayName} (${scope})`, status: "warn", detail: support.message });
         continue;
       }
-      const checks = await adapter.doctorChecks(context, scope);
+      const checks = await adapter.doctorChecks(context, scope, launch);
       hosts.push(...checks);
     }
   }

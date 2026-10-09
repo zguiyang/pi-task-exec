@@ -72,6 +72,7 @@ function fakeAdapter(root, options = {}) {
   return {
     id,
     displayName: `Fake ${id}`,
+    configFormat: "json",
     supportedPlatforms: ["darwin", "linux", "win32"],
     supportedScopes: ["project", "global"],
     installSupport(_context, scope) {
@@ -79,6 +80,25 @@ function fakeAdapter(root, options = {}) {
     },
     removeSupport(_context, scope) {
       return supported ? undefined : unsupported(scope, "remove");
+    },
+    describe(context, scope, operation) {
+      const support = operation === "remove" ? this.removeSupport(context, scope) : this.installSupport(context, scope);
+      return {
+        host: id,
+        displayName: `Fake ${id}`,
+        scope,
+        platform: context.platform,
+        format: "json",
+        path: this.resolveConfigPath(context, scope),
+        key: `mcpServers.${id}`,
+        supported: support === undefined,
+        ...(support ? { support } : {}),
+        requiresRestart: true,
+        requiresTrust: false,
+      };
+    },
+    additionalRoots() {
+      return [];
     },
     resolveConfigPath(_context, scope) {
       return join(root, scope, "config.json");
@@ -166,6 +186,7 @@ function makeDeps(root, overrides = {}) {
     skillInstaller: fakeSkillInstaller(),
     now: () => new Date("2026-10-09T00:00:00.000Z"),
     spawn: async () => ({ code: 0, stdout: "v1.0.0\n", stderr: "" }),
+    launchMode: "npm",
     roots: [root],
     ...overrides,
   };
@@ -292,18 +313,18 @@ test("--json errors are exact machine-readable objects on stdout", async () => {
   assert.equal(captured.stderr(), "");
 });
 
-test("real adapters report MCP install as unsupported without resolving or writing paths", async () => {
+test("real adapters plan a supported MCP install and write only under --yes", async () => {
   const root = await makeRoot();
   const { deps, captured } = makeDeps(root, {
     adapters: createDefaultAdapters(),
     skillInstaller: unavailableSkillInstaller(),
   });
   const action = await runCli(["add", "mcp", "--host", "codex", "--scope", "project", "--yes", "--json"], deps);
-  assert.deepEqual(action, { kind: "exit", code: 1 });
-  assert.match(captured.stdout(), /"status": "unsupported"/);
-  assert.match(captured.stdout(), /mcp_install_unverified/);
-  assert.match(captured.stdout(), /"config": null/);
-  await assert.rejects(readFile(join(root, "project", "config.json"), "utf8"));
+  assert.deepEqual(action, { kind: "exit", code: 0 });
+  assert.doesNotMatch(captured.stdout(), /mcp_install_unverified/);
+  assert.match(captured.stdout(), /\"status\": \"success\"/);
+  const configPath = join(root, "project", ".codex", "config.toml");
+  assert.match(await readFile(configPath, "utf8"), /\[mcp_servers\.pi-task-exec\]/);
 });
 
 test("supported fake adapter dry-run prints the plan, exits 0, and writes nothing", async () => {
@@ -439,10 +460,13 @@ test("doctor is read-only and reports module/version/tool/host/skill status", as
   await assert.rejects(readFile(join(root, "project", "config.json"), "utf8"));
 });
 
-test("default adapters claim no unverified platform/scope combinations", () => {
-  for (const adapter of createDefaultAdapters()) {
-    assert.deepEqual(adapter.supportedPlatforms, [], `${adapter.id} must not claim unverified platforms`);
-    assert.deepEqual(adapter.supportedScopes, [], `${adapter.id} must not claim unverified scopes`);
+test("default adapters expose verified platform, scope, and format metadata", () => {
+  const adapters = createDefaultAdapters();
+  assert.deepEqual(adapters.map((adapter) => adapter.id), ["codex", "zed", "opencode"]);
+  for (const adapter of adapters) {
+    assert.deepEqual([...adapter.supportedPlatforms].sort(), ["darwin", "linux", "win32"], `${adapter.id} platforms`);
+    assert.deepEqual([...adapter.supportedScopes].sort(), ["global", "project"], `${adapter.id} scopes`);
+    assert.ok(["toml", "jsonc"].includes(adapter.configFormat), `${adapter.id} format`);
   }
 });
 

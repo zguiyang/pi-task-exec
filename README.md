@@ -12,13 +12,17 @@ status/result → Supervisor review and acceptance. `inspect`/`implement` are
 tool capability profiles and `direct`/`worktree` are working-directory modes;
 neither is an operating-system security sandbox.
 
-> Status: Phases 6 and 7 have been implemented in this checkout and await
-> Supervisor review. Stage 8 real Host configuration adaptation, stage 9 the
-> generic `.agents/skills/` installer, and stage 10 MCP/Skill contract
-> synchronization and tool renaming have not started. The npm package and MCP
-> Registry entry have not been published. For current development, build from
-> source and run `node mcp/dist/index.js mcp serve`; `mcp/dist/` is generated
-> output from `mcp/src/`.
+> Status: Phases 6–8 have been implemented in this checkout. Stage 8 adds real
+> Codex, Zed, and OpenCode MCP install/remove with safe TOML/JSONC merging,
+> backups, and managed-entry removal. Stage 9 the generic `.agents/skills/`
+> installer and stage 10 MCP/Skill contract synchronization and tool renaming
+> have not started. The npm package and MCP Registry entry have not been
+> published. For current development, build from source and run
+> `node mcp/dist/index.js mcp serve`; `mcp/dist/` is generated output from
+> `mcp/src/`. When run from this checkout the installer writes a
+> `node <absolute-checkout>/mcp/dist/index.js mcp serve` launch entry only when
+> `--local-dev` is passed, and never represents that local path as the published
+> npm package.
 
 ## CLI surface
 
@@ -33,8 +37,8 @@ the MCP Registry entry. All six MCP tools (`pi_spawn`, `pi_status`,
 | `pi-task-exec --version` | Prints only `0.1.1` and exits `0`. |
 | `pi-task-exec mcp serve` | Starts the existing MCP stdio runtime. |
 | `pi-task-exec doctor [--json]` | Read-only environment, host, skill, and version-contract check. |
-| `pi-task-exec add mcp --host <codex\|zed\|opencode> --scope <project\|global> [--dry-run] [--json] [--yes]` | Plans the host MCP entry. |
-| `pi-task-exec remove mcp --host <...> --scope <...>` | Plans removal of the host MCP entry. |
+| `pi-task-exec add mcp --host <codex\|zed\|opencode> --scope <project\|global> [--dry-run] [--json] [--yes]` | Plans and safely merges the host MCP entry (stage 8). |
+| `pi-task-exec remove mcp --host <...> --scope <...>` | Plans removal of only the managed host MCP entry. |
 | `pi-task-exec add skill --scope <project\|global>` | Plans the bundled skill through the installer seam. |
 | `pi-task-exec remove skill --scope <project\|global>` | Plans skill removal through the installer seam. |
 | `pi-task-exec setup --target <mcp\|skill\|both> [--host <...>] --scope <...>` | Plans combined setup. |
@@ -49,12 +53,24 @@ plan is printed. Any conflict blocks the whole operation, and `--host` and
 `--scope` are mandatory for MCP add/remove/setup.
 
 The current `pi_*` MCP tools remain in place; their migration to `task_*` is
-planned for stage 10. Stage 7 defers real MCP path/config adaptation to stage 8
-and the generic `.agents/skills` installer to stage 9. The registered Codex,
-Zed, and OpenCode adapters therefore mark real MCP installation/removal as
-unsupported instead of guessing a path or writing unknown config, and skill
-operations report pending/unavailable. No host config or skill file is written
-by `add`, `remove`, or `setup` in this checkout.
+planned for stage 10. Stage 8 implements the Codex (TOML), Zed (JSONC), and
+OpenCode (JSONC) adapters; the generic `.agents/skills` installer is still
+deferred to stage 9, so skill operations report pending/unavailable. Every real
+MCP write is path-boundary and symlink checked, writes through a same-directory
+temporary file with an atomic rename, backs up an existing config before an
+update, refuses malformed or conflicting config, and removes only an entry that
+matches the pi-task-exec managed fingerprint. The fingerprint is exact: an entry
+with a different package version, local checkout path, or extra/modified entry
+fields is treated as drift, reported as a conflict, and never overwritten or
+deleted. A source-checkout install additionally requires an explicit
+`--local-dev` opt-in; the default is the published npm launch entry. Automatic
+`.git` checkout detection always wins: the launch mode cannot be forced to npm
+while a checkout is present, so an unpublished checkout is never written as an
+`npx` package, and `--local-dev` is the only route to the local `node` path.
+Project-level MCP entries carry a trust warning: Codex loads `.codex/config.toml`
+only for trusted projects and
+Zed Restricted Mode ignores `.zed/settings.json` MCP servers until the worktree
+is trusted; the installer does not grant either trust.
 
 Any unrecognized input, including the removed top-level `serve`, `version`,
 `update`, and `uninstall` routes and the unsupported `--all-hosts` flag,
@@ -62,14 +78,12 @@ reports an error and exits `1`.
 
 ## Current status and non-claims
 
-Phases 6 and 7 are implemented in this checkout and await Supervisor review.
-The following are **not** implemented and are **not** claimed:
+Phases 6–8 are implemented in this checkout. The following are **not**
+implemented and are **not** claimed:
 
 - the npm tarball has been generated locally, but the package has not been
   published and cannot currently be installed from npm; no MCP Registry record
   has been published;
-- stage 8 real Host configuration adaptation has not started: no real host MCP
-  install/remove or verified cross-platform host paths/config formats;
 - stage 9 generic `.agents/skills/` installer has not started; skill operations
   report pending/unavailable;
 - stage 10 tool migration has not started; the existing `pi_*` tools remain
@@ -116,7 +130,7 @@ occupied at publication time.
 
 | Path | Responsibility |
 | --- | --- |
-| `mcp/` | MCP worker runtime source (`mcp/src/`), tests (`mcp/tests/`), build config, and module docs. |
+| `mcp/` | MCP worker runtime source (`mcp/src/`), per-host install adapters (`mcp/src/hosts/`), tests (`mcp/tests/`), build config, and module docs. |
 | `skills/pi-delegate/` | The `pi-delegate` delegation-policy Skill and its `references/`. Maintained by JoeyZhao in the `agent-skills` project. |
 | `docs/architecture/` | Architecture decision record, implementation plan, and risk register for the migration. |
 | `README.md` | This overview. |
@@ -152,9 +166,23 @@ initialized fresh in this checkout.
 ## Installation
 
 The npm package has not been published, so it cannot currently be installed
-from npm. The `add`/`remove`/`setup` commands currently generate and print plans
-only; real host installation is deferred. During current development, build
-from source and launch with `node mcp/dist/index.js mcp serve`.
+from npm. The `add`/`remove`/`setup` commands now perform real host
+configuration writes, after printing the plan and revalidating it. When run
+from this source checkout, the installer detects the checkout and, with the
+explicit `--local-dev` opt-in, writes a
+`node <absolute-checkout>/mcp/dist/index.js mcp serve` launch entry; it never
+represents that local path as the published npm package. From an installed
+package it writes the `npx -y @zguiyang/pi-task-exec@<version> mcp serve` entry.
+During current development, build from source and launch with
+`node mcp/dist/index.js mcp serve`.
+
+Resolved host configuration paths (stage 8):
+
+| Host | User config | Project config | Entry |
+| --- | --- | --- | --- |
+| Codex | `$CODEX_HOME/config.toml` or `~/.codex/config.toml` | `.codex/config.toml` | TOML `[mcp_servers.pi-task-exec]` |
+| Zed | macOS/Linux `$XDG_CONFIG_HOME/zed/settings.json` or `~/.config/zed/settings.json`; Windows `%APPDATA%\Zed\settings.json` | `.zed/settings.json` | JSONC `context_servers.pi-task-exec` |
+| OpenCode | `OPENCODE_CONFIG`, else `$OPENCODE_CONFIG_DIR`/`$XDG_CONFIG_HOME`, else `~/.config/opencode/opencode.json` | `opencode.json` (or an existing `opencode.jsonc`) | JSONC `mcp.pi-task-exec` with `type: "local"` |
 
 After version `0.1.1` is published, this will be a future npm-based stdio launch
 example. This command is executable only after the corresponding version has

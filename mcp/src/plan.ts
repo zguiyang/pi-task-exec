@@ -1,5 +1,6 @@
+import { existsSync } from "node:fs";
 import { join } from "node:path";
-import type { HostAdapter } from "./adapters.js";
+import type { HostAdapter, HostTarget, McpLaunchSpec } from "./adapters.js";
 import type { SkillInstaller } from "./skill.js";
 import { PACKAGE_NAME, SKILL_NAME } from "./identity.js";
 import { sha256 } from "./safety.js";
@@ -85,7 +86,9 @@ export interface InstallPlan {
   scope?: Scope;
   dryRun: boolean;
   createdAt: string;
+  launchMode: LaunchMode;
   resolvedPaths: ResolvedPaths;
+  hostTarget?: HostTarget;
   creates: PlannedWrite[];
   updates: PlannedWrite[];
   removals: PlannedRemoval[];
@@ -111,10 +114,60 @@ export interface PlanDependencies {
   now: () => Date;
   packageVersion: string;
   packageRoot: string;
+  launch: McpLaunchSpec;
+  launchMode: LaunchMode;
+  /** Explicit opt-in required before writing a local checkout launch path. */
+  localDev: boolean;
 }
 
-export function launchSpec(version: string): { command: string; args: string[] } {
+export type LaunchMode = "npm" | "checkout";
+
+/** Production npm install launch contract. */
+export function npmLaunchSpec(version: string): McpLaunchSpec {
   return { command: "npx", args: ["-y", `${PACKAGE_NAME}@${version}`, "mcp", "serve"] };
+}
+
+/** Source-checkout launch contract: an absolute local path, never an npm package. */
+export function checkoutLaunchSpec(packageRoot: string): McpLaunchSpec {
+  return { command: "node", args: [join(packageRoot, "mcp", "dist", "index.js"), "mcp", "serve"] };
+}
+
+function hasGitCheckout(packageRoot: string): boolean {
+  try {
+    return existsSync(join(packageRoot, ".git"));
+  } catch {
+    // Treat an unreadable marker as absent rather than guessing.
+    return false;
+  }
+}
+
+/**
+ * A real `.git` checkout always reports checkout mode. The env override may
+ * only choose checkout when no marker is present; it can never force npm mode
+ * while a checkout is detected, so this unpublished version is never written
+ * as the published `npx` package. `--local-dev` is the only route to the
+ * local `node` launch path.
+ */
+export function detectLaunchMode(packageRoot: string, env: NodeJS.ProcessEnv): LaunchMode {
+  if (hasGitCheckout(packageRoot)) return "checkout";
+  const override = env.PI_TASK_EXEC_LAUNCH_MODE;
+  if (override === "npm" || override === "checkout") return override;
+  return "npm";
+}
+
+export function resolveLaunchSpec(input: {
+  packageRoot: string;
+  packageVersion: string;
+  env: NodeJS.ProcessEnv;
+  mode?: LaunchMode;
+}): { mode: LaunchMode; launch: McpLaunchSpec } {
+  const mode = hasGitCheckout(input.packageRoot) ? "checkout" : (input.mode ?? detectLaunchMode(input.packageRoot, input.env));
+  return { mode, launch: mode === "checkout" ? checkoutLaunchSpec(input.packageRoot) : npmLaunchSpec(input.packageVersion) };
+}
+
+/** @deprecated use {@link npmLaunchSpec}; retained for the stage 7 plan model. */
+export function launchSpec(version: string): { command: string; args: string[] } {
+  return npmLaunchSpec(version);
 }
 
 export function skillTargetDir(scope: Scope, context: HostContext): string {
@@ -159,7 +212,25 @@ export function serializePlan(plan: InstallPlan): Record<string, unknown> {
     scope: plan.scope ?? null,
     dryRun: plan.dryRun,
     createdAt: plan.createdAt,
+    launchMode: plan.launchMode,
     supported: plan.supported,
+    backupStrategy: plan.backups.length > 0 ? (plan.backups[0]?.strategy ?? "none") : "none",
+    hostTarget: plan.hostTarget
+      ? {
+          host: plan.hostTarget.host,
+          displayName: plan.hostTarget.displayName,
+          scope: plan.hostTarget.scope,
+          platform: plan.hostTarget.platform,
+          format: plan.hostTarget.format,
+          path: plan.hostTarget.path,
+          key: plan.hostTarget.key,
+          supported: plan.hostTarget.supported,
+          support: plan.hostTarget.support ? { code: plan.hostTarget.support.code, message: plan.hostTarget.support.message } : null,
+          requiresRestart: plan.hostTarget.requiresRestart,
+          requiresTrust: plan.hostTarget.requiresTrust,
+          trustNote: plan.hostTarget.trustNote ?? null,
+        }
+      : null,
     resolvedPaths: {
       config: plan.resolvedPaths.config ?? null,
       skillDir: plan.resolvedPaths.skillDir ?? null,
@@ -191,6 +262,19 @@ export function formatPlan(plan: InstallPlan): string {
   lines.push(`Host: ${plan.host ?? "n/a"}`);
   lines.push(`Scope: ${plan.scope ?? "n/a"}`);
   lines.push(`Dry run: ${plan.dryRun ? "yes" : "no"}`);
+  lines.push(`Launch mode: ${plan.launchMode}`);
+  if (plan.hostTarget) {
+    const target = plan.hostTarget;
+    lines.push(`Host target: ${target.host} (${target.displayName})`);
+    lines.push(`Platform: ${target.platform}`);
+    lines.push(`Config format: ${target.format}`);
+    lines.push(`Config key: ${target.key}`);
+    lines.push(`Config path: ${target.path}`);
+    lines.push(`Support: ${target.supported ? "supported" : `unsupported (${target.support?.code ?? "unknown"})`}`);
+    lines.push(`Restart required: ${target.requiresRestart ? "yes" : "no"}`);
+    lines.push(`Trust required: ${target.requiresTrust ? "yes" : "no"}${target.trustNote ? ` — ${target.trustNote}` : ""}`);
+  }
+  lines.push(`Backup strategy: ${plan.backups.length > 0 ? (plan.backups[0]?.strategy ?? "none") : "none"}`);
   if (plan.resolvedPaths.config) lines.push(`Config path: ${plan.resolvedPaths.config}`);
   if (plan.resolvedPaths.skillDir) lines.push(`Skill path: ${plan.resolvedPaths.skillDir}`);
   const section = (title: string, entries: string[]) => {
@@ -243,18 +327,32 @@ async function planMcp(plan: InstallPlan, request: PlanRequest, deps: PlanDepend
     return;
   }
 
-  const support = request.operation === "remove"
-    ? adapter.removeSupport(deps.context, scope)
-    : adapter.installSupport(deps.context, scope);
-  if (support) {
-    plan.unsupported.push(support);
+  const target = adapter.describe(deps.context, scope, request.operation === "remove" ? "remove" : "add");
+  plan.hostTarget = target;
+  plan.resolvedPaths.config = target.path;
+  if (target.support) {
+    plan.unsupported.push(target.support);
     return;
   }
 
-  const configPath = adapter.resolveConfigPath(deps.context, scope);
-  plan.resolvedPaths.config = configPath;
+  const configPath = target.path;
+  if (request.operation !== "remove" && deps.launchMode === "checkout") {
+    if (!deps.localDev) {
+      plan.conflicts.push({
+        code: "local_dev_required",
+        path: configPath,
+        message:
+          "The CLI is running from a source checkout. Writing an absolute local launch path requires explicit opt-in with --local-dev; the published npm package is the default launch entry.",
+      });
+      return;
+    }
+    plan.warnings.push({
+      code: "local_checkout_launch",
+      message: `This entry launches the local checkout at ${deps.launch.args[0] ?? deps.launch.command} with node, not a published npm package. The npm package is not published; re-run from an installed package before sharing this configuration.`,
+    });
+  }
   const currentContent = (await adapter.readConfig(configPath)) ?? null;
-  const input = { context: deps.context, scope, serverId: "pi-task-exec", launch: launchSpec(deps.packageVersion), currentContent };
+  const input = { context: deps.context, scope, serverId: "pi-task-exec", launch: deps.launch, currentContent };
 
   if (request.operation === "remove") {
     const result = adapter.planRemoval(input);
@@ -372,6 +470,7 @@ export async function generatePlan(request: PlanRequest, deps: PlanDependencies)
     ...(request.scope !== undefined ? { scope: request.scope } : {}),
     dryRun: request.dryRun,
     createdAt: deps.now().toISOString(),
+    launchMode: deps.launchMode,
     resolvedPaths: {},
     creates: [],
     updates: [],

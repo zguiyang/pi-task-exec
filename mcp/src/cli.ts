@@ -1,5 +1,5 @@
 import type { HostAdapter } from "./adapters.js";
-import { KNOWN_HOST_IDS, isHostId } from "./adapters.js";
+import { KNOWN_HOST_IDS, findAdapter, isHostId } from "./adapters.js";
 import type { SpawnFunction } from "./doctor.js";
 import { formatDoctor, runDoctor } from "./doctor.js";
 import { PACKAGE_NAME, PRODUCT_NAME, VERSION } from "./identity.js";
@@ -8,7 +8,9 @@ import {
   formatPlan,
   generatePlan,
   planJson,
+  resolveLaunchSpec,
   type HostContext,
+  type LaunchMode,
   type PlanOperation,
   type PlanTarget,
   type Scope,
@@ -28,6 +30,8 @@ export interface CliOptions {
   json: boolean;
   help: boolean;
   version: boolean;
+  /** Explicit opt-in before writing an absolute local checkout launch path. */
+  localDev: boolean;
 }
 
 export type ParsedCli =
@@ -45,6 +49,8 @@ export interface CliDeps {
   platform: NodeJS.Platform;
   packageRoot: string;
   packageVersion: string;
+  /** Explicit launch-mode override; otherwise detected from the package root/env. */
+  launchMode?: LaunchMode;
   adapters: readonly HostAdapter[];
   skillInstaller: SkillInstaller;
   now: () => Date;
@@ -72,6 +78,7 @@ Options:
   --help                             Show help and exit
   --version                          Print only the package version and exit
   --dry-run                          Print the plan and exit without writing
+  --local-dev                        Explicitly allow installing an absolute source-checkout path (checkout mode only)
   --json                             Print stable machine-readable JSON
   --yes                              Skip confirmation only after the plan is printed
   --host <${KNOWN_HOST_IDS.join("|")}>
@@ -87,11 +94,11 @@ function commandHelp(topic: string): string {
     case "mcp serve":
       return `Usage:\n  ${PRODUCT_NAME} mcp serve\n\nStart the MCP stdio runtime. This is the only server-start command and the Registry launch contract.`;
     case "add mcp":
-      return `Usage:\n  ${PRODUCT_NAME} add mcp --host <${KNOWN_HOST_IDS.join("|")}> --scope <project|global> [--dry-run] [--json] [--yes]\n\nPlan and (when verified) install the pi-task-exec MCP entry for an explicit host and scope. Stage 7 defers real path/config adaptation, so supported host/scope combinations report an unsupported reason and write nothing.`;
+      return `Usage:\n  ${PRODUCT_NAME} add mcp --host <${KNOWN_HOST_IDS.join("|")}> --scope <project|global> [--dry-run] [--json] [--yes]\n\nPlan and install the pi-task-exec MCP entry for an explicit host and scope. Host-specific paths and formats (Codex TOML, Zed/OpenCode JSONC) are merged safely; unrelated configuration is preserved and conflicts stop the whole operation.`;
     case "add skill":
-      return `Usage:\n  ${PRODUCT_NAME} add skill --scope <project|global> [--dry-run] [--json] [--yes]\n\nPlan and (when available) install the bundled pi-delegate skill. The generic installer is deferred, so this currently reports unavailable and writes nothing.`;
+      return `Usage:\n  ${PRODUCT_NAME} add skill --scope <project|global> [--dry-run] [--json] [--yes]\n\nPlan and (when available) install the bundled pi-delegate skill. The generic installer is deferred to stage 9, so this currently reports unavailable and writes nothing.`;
     case "remove mcp":
-      return `Usage:\n  ${PRODUCT_NAME} remove mcp --host <${KNOWN_HOST_IDS.join("|")}> --scope <project|global> [--dry-run] [--json] [--yes]\n\nPlan and (when verified) remove the pi-task-exec MCP entry for an explicit host and scope.`;
+      return `Usage:\n  ${PRODUCT_NAME} remove mcp --host <${KNOWN_HOST_IDS.join("|")}> --scope <project|global> [--dry-run] [--json] [--yes]\n\nPlan and remove the pi-task-exec MCP entry for an explicit host and scope. Only an entry created by pi-task-exec (managed fingerprint) is removed; user entries are left untouched.`;
     case "remove skill":
       return `Usage:\n  ${PRODUCT_NAME} remove skill --scope <project|global> [--dry-run] [--json] [--yes]\n\nPlan and (when available) remove the managed pi-delegate skill.`;
     case "setup":
@@ -121,7 +128,7 @@ function isTarget(value: string): value is PlanTarget {
 
 /** Pure argument parser. Unknown or malformed input always becomes an error. */
 export function parseCli(args: string[]): ParsedCli {
-  const options: CliOptions = { dryRun: false, yes: false, json: false, help: false, version: false };
+  const options: CliOptions = { dryRun: false, yes: false, json: false, help: false, version: false, localDev: false };
   const positionals: string[] = [];
   let sawToken = false;
 
@@ -152,6 +159,8 @@ export function parseCli(args: string[]): ParsedCli {
         options.version = true;
       } else if (name === "--dry-run") {
         options.dryRun = true;
+      } else if (name === "--local-dev") {
+        options.localDev = true;
       } else if (name === "--yes") {
         options.yes = true;
       } else if (name === "--json") {
@@ -288,6 +297,13 @@ async function runCommand(parsed: Extract<ParsedCli, { kind: "command" }>, deps:
     return { kind: "exit", code: 0 };
   }
 
+  const { launch, mode: launchMode } = resolveLaunchSpec({
+    packageRoot: deps.packageRoot,
+    packageVersion: deps.packageVersion,
+    env: deps.env,
+    ...(deps.launchMode !== undefined ? { mode: deps.launchMode } : {}),
+  });
+
   const plan = await generatePlan(
     {
       operation,
@@ -303,14 +319,22 @@ async function runCommand(parsed: Extract<ParsedCli, { kind: "command" }>, deps:
       now: deps.now,
       packageVersion: deps.packageVersion,
       packageRoot: deps.packageRoot,
+      launch,
+      launchMode,
+      localDev: options.localDev,
     },
   );
 
   // The plan is always printed before confirmation or any write.
   deps.io.stdout(options.json ? `${planJson(plan)}\n` : `${formatPlan(plan)}\n`);
 
+  const baseRoots = deps.roots ?? [deps.home, deps.cwd];
+  const selectionAdapter = options.host !== undefined ? findAdapter(deps.adapters, options.host) : undefined;
+  const extraRoots = selectionAdapter && options.scope !== undefined ? selectionAdapter.additionalRoots(context, options.scope) : [];
+  const roots = extraRoots.length > 0 ? [...baseRoots, ...extraRoots] : baseRoots;
+
   const result = await executePlan(plan, {
-    roots: deps.roots ?? [deps.home, deps.cwd],
+    roots,
     adapters: deps.adapters,
     io: deps.io,
     yes: options.yes,
