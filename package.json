@@ -16,6 +16,8 @@
     "bin/**",
     "skills/pi-delegate/**",
     "README.md",
+    "README.zh-CN.md",
+    "docs/usage.md",
     "LICENSE",
     "server.json"
   ],
