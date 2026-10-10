@@ -1,8 +1,22 @@
 # Pi TaskExec
 
-Delegate coding tasks to local [Pi](https://pi.dev) workers from your main
-agent through MCP. Your main agent handles planning and review; Pi TaskExec
-manages worker execution and returns status and results.
+Pi TaskExec delegates well-defined coding tasks to local [Pi](https://pi.dev)
+workers through MCP, letting the main agent focus on planning, decisions, and
+review while reducing the hassle of switching between agents and manually
+copying context.
+
+The project grew out of the author's own workflow: using different models or
+subscription plans for planning and review versus execution. If you also have
+multiple AI coding subscriptions or model resources, you can try this division
+of work to make better use of them and keep execution details from crowding
+the main agent's context.
+
+The author is still evaluating how this approach affects context usage, total
+token consumption, and actual costs; savings are not guaranteed. It addresses
+the author's own collaboration needs and may help others with similar
+workflows. You're welcome to try it and share your experiences, alternative
+views, or suggestions via
+[Issues](https://github.com/zguiyang/pi-task-exec/issues).
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
