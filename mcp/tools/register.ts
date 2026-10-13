@@ -9,10 +9,15 @@ function ok(value: unknown) {
 
 function fail(error: unknown) {
   const code = error && typeof error === "object" && "code" in error && typeof error.code === "string" ? error.code : undefined;
+  const phase = error && typeof error === "object" && "phase" in error && typeof error.phase === "string" ? error.phase : undefined;
+  const workerId = error && typeof error === "object" && "workerId" in error && typeof error.workerId === "string" ? error.workerId : undefined;
   const message = error instanceof Error ? error.message : String(error);
+  const structuredContent = code
+    ? { code, message, ...(phase ? { phase } : {}), ...(workerId ? { workerId } : {}) }
+    : undefined;
   return {
     isError: true,
-    ...(code ? { structuredContent: { code, message } } : {}),
+    ...(structuredContent ? { structuredContent } : {}),
     content: [{ type: "text" as const, text: message }],
   };
 }
@@ -43,12 +48,16 @@ server.registerTool(
 server.registerTool(
   "pi_status",
   {
-    description: "Check a worker's progress, state, and terminal result. Settled means its current activity cycle has ended; it does not mean the result is correct. After failure, inspect the result and decide how to recover or continue related work. Avoid frequent busy polling.",
-    inputSchema: { workerId: z.string().uuid().describe("ID returned by pi_spawn or pi_list.") },
+    description: "Check a worker's progress, state, and the authoritative result of its current activity cycle. The result comes only from Pi's final assistant message and is independent of streamed diagnostics. Settled means the cycle ended; it does not mean the result is correct. Use waitMs to block, event driven, until the cycle settles or fails; a wait timeout does not cancel the worker. Avoid frequent busy polling.",
+    inputSchema: {
+      workerId: z.string().uuid().describe("ID returned by pi_spawn or pi_list."),
+      waitMs: z.number().int().min(0).max(30_000).optional().describe("Optional bounded wait in milliseconds (0-30000). Returns as soon as the current cycle settles, fails, or the process exits. Defaults to an immediate snapshot."),
+      cycleId: z.number().int().min(1).optional().describe("Optional activity cycle to wait for. Returns once that cycle has ended, even if a newer cycle has already started."),
+    },
   },
-  async ({ workerId }) => {
+  async ({ workerId, waitMs, cycleId }) => {
     try {
-      return ok(manager.status(workerId));
+      return ok(await manager.waitStatus(workerId, { ...(waitMs !== undefined ? { waitMs } : {}), ...(cycleId !== undefined ? { cycleId } : {}) }));
     } catch (error) {
       return fail(error);
     }
@@ -73,7 +82,7 @@ server.registerTool(
 server.registerTool(
   "pi_continue",
   {
-    description: "Give the same worker a related follow-up that benefits from its current context. While running, the follow-up is queued; when settled, it starts a new activity cycle. Accepted/queued is not completed. Use a new worker for unrelated work. Cannot reuse an aborting or terminal worker.",
+    description: "Give the same worker a related follow-up that benefits from its current context. While running, the follow-up is queued and delivered inside the current activity cycle; once the cycle has settled (or failed), it starts a new cycle on the same process. Accepted/queued is not completed. Use a new worker for unrelated work. Cannot reuse a released or crashed worker.",
     inputSchema: { workerId: z.string().uuid().describe("ID of the worker whose context should be reused."), task: z.string().min(1).max(20_000).describe("Related follow-up task with a clear expected result.") },
   },
   async ({ workerId, task }) => {
@@ -88,8 +97,8 @@ server.registerTool(
 server.registerTool(
   "pi_abort",
   {
-    description: "Stop an incorrect or no-longer-needed worker, or release a settled worker's process and live-worker slot when no follow-up is needed. A terminal worker returns its existing snapshot without further action. Releasing a worker does not revert direct edits or delete its worktree.",
-    inputSchema: { workerId: z.string().uuid().describe("ID of the worker to stop and release.") },
+    description: "Cancel the current activity cycle of a running worker without releasing its process or live-worker slot. The worker can be continued afterwards when its process is still alive. A worker with no running cycle returns its existing snapshot unchanged. Use pi_release to terminate the process and free the slot.",
+    inputSchema: { workerId: z.string().uuid().describe("ID of the worker whose current cycle should be cancelled.") },
   },
   async ({ workerId }) => {
     try {
@@ -101,9 +110,24 @@ server.registerTool(
 );
 
 server.registerTool(
+  "pi_release",
+  {
+    description: "Release a worker's process and live-worker slot without reverting edits or deleting its worktree. Releasing a settled or failed worker preserves its authoritative result and failure. Releasing a running worker cancels and terminates it. Release is idempotent; if termination cannot be confirmed the snapshot carries releaseError and pi_release can be retried.",
+    inputSchema: { workerId: z.string().uuid().describe("ID of the worker to release.") },
+  },
+  async ({ workerId }) => {
+    try {
+      return ok(await manager.release(workerId));
+    } catch (error) {
+      return fail(error);
+    }
+  },
+);
+
+server.registerTool(
   "pi_list",
   {
-    description: "Inspect the current worker fleet before spawning more workers. Results are newest first and include running and settled workers, which still occupy slots, and terminal workers, which cannot be reused. The list does not include the configured worker limit.",
+    description: "Inspect the current worker fleet before spawning more workers. Results are newest first and include live workers (running, settled, or cycle-failed), which still occupy slots and can be continued or released, plus bounded released/crashed snapshots, which cannot be reused. The list does not include the configured worker limit.",
     inputSchema: {},
   },
   async () => ok(manager.list()),
