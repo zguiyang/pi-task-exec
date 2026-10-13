@@ -10,17 +10,16 @@ Pi TaskExec 通过 MCP 将明确的编码任务委派给本地 [Pi](https://pi.d
 
 ## 核心能力
 
-- 在本地 Pi 上执行任务，并使用 Pi 本地配置的默认模型。
-- 完整的工作进程生命周期：spawn、status、steer、continue、abort、list。
-- 只读 `inspect` 与可读写的 `implement` 能力配置。
-- `direct` 就地修改或隔离的 `worktree` 工作目录模式。
+- 在本地 Pi 上执行任务，默认使用 Pi 本地配置的模型，也可按 Worker 指定 `model` 和 `thinking`。
+- 完整的工作进程生命周期：spawn、带界等待的 status、steer、continue、取消（`pi_abort`）、释放（`pi_release`），以及 list。
+- 只读 `inspect`（默认）与可读写的 `implement` 能力配置。
+- 工作目录由 Supervisor 指定；MCP 仅做授权校验，绝不创建 worktree 或分支。
 - 面向 Codex、Zed、OpenCode 的统一 MCP + `pi-delegate` Skill 安装。
 
 ## 环境要求
 
 - Node.js >= 22.20
 - 已安装并配置好的 [`pi`](https://pi.dev) 可执行文件
-- 使用 `worktree` 模式时需要 Git
 
 ## 快速开始
 
@@ -29,6 +28,8 @@ Pi TaskExec 通过 MCP 将明确的编码任务委派给本地 [Pi](https://pi.d
 ```sh
 npx -y @zguiyang/pi-task-exec@latest setup
 ```
+
+> 本文档描述的 v0.3.0 工作进程接口（七个工具、`thinking`、cycle、`pi_abort`/`pi_release`）需在 v0.3.0 发布后才会生效；当前 `@latest` 仍为 v0.2.2，使用旧的 `mode` 接口。
 
 命令会提示选择宿主与作用域，打印 MCP 与 Skill 的写入计划并请求确认。也可以
 预先指定选项（仍需确认）：

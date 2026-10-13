@@ -74,7 +74,6 @@ test("an ordinary non-git directory is used as the worker cwd without creating p
   try {
     const worker = await manager.spawn({ task: "plain task", cwd: plain, profile: "inspect" });
     assert.equal(worker.cwd, await realpath(plain));
-    assert.equal(worker.mode, undefined);
     assert.equal(existsSync(join(plain, ".pi-task-exec")), false);
     await manager.abort(worker.id);
   } finally {

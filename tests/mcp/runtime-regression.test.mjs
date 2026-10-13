@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
-import { readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join, resolve } from "node:path";
@@ -12,7 +12,7 @@ const names = [
   "PI_WORKER_COMMAND", "PI_WORKER_RPC_TIMEOUT_MS", "PI_WORKER_IDLE_TIMEOUT_MS",
   "PI_WORKER_TASK_TIMEOUT_MS", "PI_WORKER_ABORT_GRACE_MS", "PI_WORKER_TERM_GRACE_MS",
   "PI_WORKER_MAX_RECENT_EVENTS", "PI_WORKER_ALLOWED_ROOTS", "PI_WORKER_MAX_WORKERS",
-  "FAKE_PI_MODE", "FAKE_PI_MODELS", "FAKE_PI_DEFAULT_MODEL", "FAKE_PI_REQUEST_LOG",
+  "FAKE_PI_MODE", "FAKE_PI_MODELS", "FAKE_PI_DEFAULT_MODEL", "FAKE_PI_REQUEST_LOG", "FAKE_PI_CONTEXT_LOG",
 ];
 const prior = new Map(names.map((name) => [name, process.env[name]]));
 let manager;
@@ -399,5 +399,43 @@ test("a process group leader exit still reaps surviving tool descendants", { ski
     assert.throws(() => process.kill(descendantPid, 0), { code: "ESRCH" });
   } finally {
     try { process.kill(descendantPid, "SIGKILL"); } catch { /* already reaped */ }
+  }
+});
+
+// ---- Profile-scoped tools and canonical cwd --------------------------------
+
+test("spawn selects profile-scoped Pi tools and runs in the canonical authorized cwd", { skip: process.platform === "win32" }, async () => {
+  const base = await mkdtemp(join(tmpdir(), "pi-worker-tools-"));
+  const linked = join(base, "linked");
+  await symlink(base, linked);
+  const contextLog = join(tmpdir(), `pi-worker-context-${process.pid}-${Math.random()}.jsonl`);
+  configure("silent", { allowedRoot: base, task: 5_000 });
+  process.env.FAKE_PI_CONTEXT_LOG = contextLog;
+  try {
+    const inspect = await manager.spawn({ task: "inspect task", cwd: linked, profile: "inspect" });
+    const implement = await manager.spawn({ task: "implement task", cwd: base, profile: "implement" });
+    const contexts = (await readFile(contextLog, "utf8")).trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+    assert.equal(contexts.length, 2);
+    const [inspectContext, implementContext] = contexts;
+    const toolsFor = (context) => {
+      const index = context.argv.indexOf("--tools");
+      assert.notEqual(index, -1, "Pi must be launched with an explicit --tools list");
+      return context.argv[index + 1].split(",");
+    };
+    assert.deepEqual(inspectContext.argv.slice(0, 3), ["--mode", "rpc", "--no-session"]);
+    assert.deepEqual(toolsFor(inspectContext), ["read", "grep", "find", "ls"]);
+    assert.equal(toolsFor(inspectContext).some((tool) => ["edit", "write", "bash"].includes(tool)), false);
+    assert.deepEqual(toolsFor(implementContext), ["read", "edit", "write", "bash", "grep", "find", "ls"]);
+    assert.equal(["edit", "write", "bash"].every((tool) => toolsFor(implementContext).includes(tool)), true);
+    assert.equal(inspectContext.cwd, await realpath(linked));
+    assert.equal(inspectContext.cwd, await realpath(base));
+    assert.equal(implementContext.cwd, await realpath(base));
+    assert.equal(inspect.cwd, await realpath(linked));
+    assert.equal(implement.cwd, await realpath(base));
+    await manager.release(inspect.id);
+    await manager.release(implement.id);
+  } finally {
+    await rm(base, { recursive: true, force: true });
+    await rm(contextLog, { force: true });
   }
 });

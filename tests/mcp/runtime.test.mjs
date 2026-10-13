@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { readFile } from "node:fs/promises";
 import readline from "node:readline";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -69,7 +70,7 @@ async function initialize(server, capabilities = {}) {
   const result = await server.request("initialize", {
     protocolVersion: "2025-03-26",
     capabilities,
-    clientInfo: { name: "pi-task-exec-test", version: "0.2.2" },
+    clientInfo: { name: "pi-task-exec-test", version: "0.3.0" },
   });
   assert.equal(result.error, undefined);
   server.notify("notifications/initialized");
@@ -93,7 +94,7 @@ test("MCP discovery exposes delegation guidance, tool choice semantics, and type
   try {
     const initialized = await initialize(server);
     assert.equal(initialized.serverInfo.name, "pi-task-exec");
-    assert.equal(initialized.serverInfo.version, "0.2.2");
+    assert.equal(initialized.serverInfo.version, "0.3.0");
     assert.match(initialized.instructions, /subordinate coding workers/i);
     assert.match(initialized.instructions, /planning.*architecture.*delegation.*integration.*final review/i);
     assert.match(initialized.instructions, /never recursively delegate/i);
@@ -134,12 +135,15 @@ test("MCP discovery exposes delegation guidance, tool choice semantics, and type
 
     const spawnSchema = byName.pi_spawn.inputSchema;
     assert.deepEqual(spawnSchema.required, ["task", "cwd"]);
+    assert.deepEqual(Object.keys(spawnSchema.properties).sort(), ["cwd", "model", "profile", "task", "taskTimeoutMs", "thinking"]);
     assert.deepEqual(spawnSchema.properties.profile.enum, ["inspect", "implement"]);
+    assert.equal(spawnSchema.properties.profile.default, "inspect");
     assert.match(spawnSchema.properties.profile.description, /read-only/i);
-    assert.equal(spawnSchema.properties.mode, undefined);
     assert.equal(spawnSchema.properties.model.type, "string");
     assert.match(spawnSchema.properties.model.description, /Pi chooses its locally configured default/i);
-
+    assert.deepEqual(spawnSchema.properties.thinking.enum, ["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+    assert.match(spawnSchema.properties.thinking.description, /configured default/i);
+    assert.match(spawnSchema.properties.thinking.description, /unsupported level is reported/i);
     assert.deepEqual(byName.pi_status.inputSchema.required, ["workerId"]);
     assert.equal(byName.pi_status.inputSchema.properties.waitMs.minimum, 0);
     assert.equal(byName.pi_status.inputSchema.properties.waitMs.maximum, 30_000);
@@ -150,6 +154,27 @@ test("MCP discovery exposes delegation guidance, tool choice semantics, and type
     assert.deepEqual(byName.pi_release.inputSchema.required, ["workerId"]);
     assert.deepEqual(byName.pi_list.inputSchema.properties, {});
     assert.equal(byName.pi_list.inputSchema.required, undefined);
+
+    // The published contract table must name exactly the live tool parameters.
+    const contract = await readFile(resolve(root, "skills/pi-delegate/references/mcp-contract.md"), "utf8");
+    const documented = Object.fromEntries(
+      contract.split("\n")
+        .filter((line) => /^\|\s*`pi_/.test(line))
+        .map((line) => {
+          const cells = line.split("|").slice(1, -1).map((cell) => cell.trim());
+          const name = cells[0].replaceAll("`", "");
+          const parse = (cell) => (cell === "none" ? [] : [...cell.matchAll(/`([^`]+)`/g)].map((match) => match[1]));
+          return [name, { required: parse(cells[1]), optional: parse(cells[2]) }];
+        }),
+    );
+    assert.deepEqual(Object.keys(documented).sort(), tools.map((entry) => entry.name).sort());
+    for (const [name, entry] of Object.entries(documented)) {
+      const schema = byName[name].inputSchema;
+      const required = [...(schema.required ?? [])].sort();
+      const optional = Object.keys(schema.properties ?? {}).filter((property) => !required.includes(property)).sort();
+      assert.deepEqual(required, [...entry.required].sort(), `${name} required parameters must match the contract`);
+      assert.deepEqual(optional, [...entry.optional].sort(), `${name} optional parameters must match the contract`);
+    }
   } finally {
     await shutdown(server);
   }

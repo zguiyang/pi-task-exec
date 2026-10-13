@@ -13,6 +13,7 @@ import {
   type WorkerResult,
   type WorkerSnapshot,
   type WorkerStatus,
+  type WorkerThinkingLevel,
 } from "../workers/types.js";
 
 interface RpcResponse {
@@ -286,8 +287,8 @@ export class PiRpcWorker {
     return this.serialize(() => this.runActivityCycle("prompt", "prompt", message, "prompt_handled", "Pi handled the prompt without starting an agent activity cycle", undefined, "prompt"));
   }
 
-  initializeModel(requestedModel?: string): Promise<void> {
-    return this.serialize(() => this.initializeModelInternal(requestedModel));
+  initializeModel(requestedModel?: string, requestedThinking?: WorkerThinkingLevel): Promise<void> {
+    return this.serialize(() => this.initializeModelInternal(requestedModel, requestedThinking));
   }
 
   steer(message: string): Promise<void> {
@@ -394,7 +395,7 @@ export class PiRpcWorker {
     }
   }
 
-  private async initializeModelInternal(requestedModel?: string): Promise<void> {
+  private async initializeModelInternal(requestedModel?: string, requestedThinking?: WorkerThinkingLevel): Promise<void> {
     try {
       let expected: PiModelIdentity | undefined;
       if (requestedModel !== undefined) {
@@ -428,6 +429,27 @@ export class PiRpcWorker {
         }
       }
 
+      if (requestedThinking !== undefined) {
+        let availableResponse: RpcResponse;
+        try {
+          availableResponse = await this.send("get_available_thinking_levels", {});
+        } catch (error) {
+          throw new RpcError("THINKING_LEVEL_STATE_FAILED", error instanceof Error ? error.message : String(error), "thinking");
+        }
+        const availableData = availableResponse.data as { levels?: unknown } | undefined;
+        const levels = Array.isArray(availableData?.levels)
+          ? availableData.levels.filter((level): level is string => typeof level === "string")
+          : [];
+        if (!levels.includes(requestedThinking)) {
+          throw new RpcError("THINKING_LEVEL_NOT_AVAILABLE", `Requested thinking level "${requestedThinking}" is not supported by the active model for this worker. Available levels: ${levels.length > 0 ? levels.join(", ") : "unknown"}. Omit thinking to keep Pi's default, or choose a supported level.`, "thinking");
+        }
+        try {
+          await this.send("set_thinking_level", { level: requestedThinking });
+        } catch (error) {
+          throw new RpcError("THINKING_LEVEL_SET_FAILED", error instanceof Error ? error.message : String(error), "thinking");
+        }
+      }
+
       let stateResponse: RpcResponse;
       try {
         stateResponse = await this.send("get_state", {});
@@ -441,7 +463,11 @@ export class PiRpcWorker {
         throw new RpcError("MODEL_STATE_MISMATCH", `Pi accepted model "${canonicalModel(expected)}" but get_state reported ${observed}. Worker prompt was not started.`, "model");
       }
       if (effective) this.snapshot.effectiveModel = effective;
-      if (typeof state?.thinkingLevel === "string") this.snapshot.thinkingLevel = state.thinkingLevel;
+      const observedThinking = typeof state?.thinkingLevel === "string" ? state.thinkingLevel : undefined;
+      if (requestedThinking !== undefined && observedThinking !== requestedThinking) {
+        throw new RpcError("THINKING_LEVEL_MISMATCH", `Pi accepted thinking level "${requestedThinking}" but get_state reported ${observedThinking ?? "no active thinking level"}. Worker prompt was not started.`, "thinking");
+      }
+      if (observedThinking !== undefined) this.snapshot.thinkingLevel = observedThinking;
     } catch (error) {
       await this.failRequest(error, "model");
       throw error;

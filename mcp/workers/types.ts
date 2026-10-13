@@ -10,6 +10,8 @@ export type WorkerStatus =
   | "crashed";
 
 export type WorkerProfile = "inspect" | "implement";
+/** Reasoning levels accepted by Pi 1.1.0 `set_thinking_level`; the active model may support only a subset. */
+export type WorkerThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 /**
  * Where a failure was observed. The phase lets a client tell a spawn/model
@@ -18,6 +20,7 @@ export type WorkerProfile = "inspect" | "implement";
 export type FailurePhase =
   | "spawn"
   | "model"
+  | "thinking"
   | "prompt"
   | "follow_up"
   | "steer"
@@ -75,6 +78,7 @@ export interface WorkerSnapshot {
   cwd: string;
   profile: WorkerProfile;
   requestedModel?: string;
+  requestedThinking?: WorkerThinkingLevel;
   effectiveModel?: { provider: string; id: string };
   thinkingLevel?: string;
   sessionMode: "no-session";

@@ -5,7 +5,7 @@ import { delimiter, isAbsolute, relative, resolve, sep } from "node:path";
 import { PiRpcWorker } from "../rpc/pi-rpc.js";
 import { toWorkerError, WorkerError } from "./errors.js";
 import { CYCLE_TERMINAL_STATES, DEFAULT_WORKER_CONFIG } from "./types.js";
-import type { WorkerConfig, WorkerProfile, WorkerSnapshot } from "./types.js";
+import type { WorkerConfig, WorkerProfile, WorkerSnapshot, WorkerThinkingLevel } from "./types.js";
 
 /** Maximum pi_status wait window. Kept below common MCP Host request timeouts. */
 export const MAX_STATUS_WAIT_MS = 30_000;
@@ -69,7 +69,8 @@ export class WorkerManager {
     return pending;
   }
 
-  async spawn(input: { task: string; cwd: string; profile: WorkerProfile; taskTimeoutMs?: number | undefined; model?: string | undefined }) {
+  async spawn(input: { task: string; cwd: string; profile?: WorkerProfile; taskTimeoutMs?: number | undefined; model?: string | undefined; thinking?: WorkerThinkingLevel | undefined }) {
+    const profile: WorkerProfile = input.profile ?? "inspect";
     if (this.shuttingDown) throw new WorkerError("SERVER_SHUTTING_DOWN", "MCP server is shutting down and cannot start workers", "spawn");
     if (this.workers.size + this.spawning >= this.maxWorkers) {
       throw new WorkerError(
@@ -95,8 +96,9 @@ export class WorkerManager {
         id,
         task: input.task,
         cwd: workerCwd,
-        profile: input.profile,
+        profile,
         ...(input.model !== undefined ? { requestedModel: input.model } : {}),
+        ...(input.thinking !== undefined ? { requestedThinking: input.thinking } : {}),
         sessionMode: "no-session",
         status: "starting",
         state: "starting",
@@ -114,7 +116,7 @@ export class WorkerManager {
         released: false,
       };
       const args = ["--mode", "rpc", "--no-session"];
-      args.push("--tools", input.profile === "inspect" ? "read,grep,find,ls" : "read,edit,write,bash,grep,find,ls");
+      args.push("--tools", profile === "inspect" ? "read,grep,find,ls" : "read,edit,write,bash,grep,find,ls");
       const workerConfig = {
         ...this.config,
         taskTimeoutMs: input.taskTimeoutMs ?? this.config.taskTimeoutMs,
@@ -137,7 +139,7 @@ export class WorkerManager {
       reservationHeld = false;
       try {
         await worker.ready();
-        await worker.initializeModel(input.model);
+        await worker.initializeModel(input.model, input.thinking);
         await worker.prompt(input.task);
         return worker.refresh();
       } catch (error) {
