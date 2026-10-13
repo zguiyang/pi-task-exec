@@ -109,7 +109,7 @@ test("MCP discovery exposes delegation guidance, tool choice semantics, and type
     const runtimeGuidance = [initialized.instructions, ...tools.map((tool) => tool.description)].join("\n");
     assert.doesNotMatch(runtimeGuidance, /\b(codex|openai|claude|anthropic|cursor|zed|opencode)\b/i);
 
-    for (const phrase of ["bounded", "trivial", "architecture", "independent", "worktrees", "final review", "accepted, not completed"]) {
+    for (const phrase of ["bounded", "trivial", "architecture", "independent", "final review", "accepted, not completed"]) {
       assert.ok(byName.pi_spawn.description.toLowerCase().includes(phrase), `pi_spawn description should mention ${phrase}`);
     }
     for (const phrase of ["progress", "settled", "failure", "busy polling"]) {
@@ -121,21 +121,19 @@ test("MCP discovery exposes delegation guidance, tool choice semantics, and type
     assert.match(byName.pi_continue.description, /related follow-up/i);
     assert.match(byName.pi_continue.description, /unrelated work/i);
     assert.match(byName.pi_continue.description, /running.*queued.*settled.*activity cycle/i);
-    assert.match(byName.pi_spawn.description, /failed direct worker.*partial edits.*worktree edits.*not merged or deleted automatically/i);
+    assert.match(byName.pi_spawn.description, /failed implement worker.*partial edits.*integration and final review/i);
     assert.match(byName.pi_abort.description, /terminal worker.*existing snapshot.*does not revert direct edits or delete its worktree/i);
     assert.match(byName.pi_list.description, /fleet.*newest first.*does not include the configured worker limit/i);
 
     const spawnSchema = byName.pi_spawn.inputSchema;
-    assert.deepEqual(spawnSchema.required, ["task", "cwd", "mode"]);
-    assert.deepEqual(spawnSchema.properties.mode.enum, ["direct", "worktree"]);
+    assert.deepEqual(spawnSchema.required, ["task", "cwd"]);
     assert.deepEqual(spawnSchema.properties.profile.enum, ["inspect", "implement"]);
     assert.match(spawnSchema.properties.profile.description, /read-only/i);
-    assert.match(spawnSchema.properties.mode.description, /separate worktrees/i);
+    assert.equal(spawnSchema.properties.mode, undefined);
     assert.equal(spawnSchema.properties.model.type, "string");
     assert.equal(spawnSchema.properties.model.enum, undefined);
     assert.match(spawnSchema.properties.model.description, /this worker only/i);
     assert.match(spawnSchema.properties.model.description, /Pi chooses its locally configured default/i);
-    assert.deepEqual(spawnSchema.required, ["task", "cwd", "mode"]);
     assert.deepEqual(byName.pi_status.inputSchema.required, ["workerId"]);
     assert.deepEqual(byName.pi_steer.inputSchema.required, ["workerId", "task"]);
     assert.deepEqual(byName.pi_continue.inputSchema.required, ["workerId", "task"]);
@@ -154,7 +152,7 @@ test("MCP model resolution errors include a structured code and never prompt Pi"
     await initialize(server);
     const result = await server.request("tools/call", {
       name: "pi_spawn",
-      arguments: { task: "bounded fake task", cwd: root, mode: "direct", model: "not-available" },
+      arguments: { task: "bounded fake task", cwd: root, model: "not-available" },
     });
     assert.equal(result.result.isError, true);
     assert.deepEqual(result.result.structuredContent, {
@@ -179,7 +177,7 @@ test("MCP worker lifecycle supports steer, settled continuation, review, and rel
     await initialize(server);
     const spawned = await server.request("tools/call", {
       name: "pi_spawn",
-      arguments: { task: "bounded fake implementation", cwd: root, mode: "direct", profile: "inspect" },
+      arguments: { task: "bounded fake implementation", cwd: root, profile: "inspect" },
     });
     assert.equal(spawned.result.isError, undefined);
     const worker = JSON.parse(spawned.result.content[0].text);
@@ -216,7 +214,7 @@ test("MCP spawn RPC timeout returns and pi_status exposes a recoverable terminal
     await initialize(server);
     const spawnResult = await server.request("tools/call", {
       name: "pi_spawn",
-      arguments: { task: "fake no-response", cwd: root, mode: "direct", profile: "inspect" },
+      arguments: { task: "fake no-response", cwd: root, profile: "inspect" },
     });
     assert.equal(spawnResult.error, undefined);
     assert.equal(spawnResult.result.isError, true);
@@ -237,7 +235,7 @@ test("MCP stdin shutdown terminates an active worker process", async () => {
     await initialize(server);
     const result = await server.request("tools/call", {
       name: "pi_spawn",
-      arguments: { task: "fake active task", cwd: root, mode: "direct", profile: "inspect" },
+      arguments: { task: "fake active task", cwd: root, profile: "inspect" },
     });
     assert.equal(result.result.isError, undefined);
     const worker = JSON.parse(result.result.content[0].text);
@@ -263,7 +261,7 @@ test("SIGTERM shutdown terminates an active worker process", async () => {
     await initialize(server);
     const result = await server.request("tools/call", {
       name: "pi_spawn",
-      arguments: { task: "fake active task", cwd: root, mode: "direct", profile: "inspect" },
+      arguments: { task: "fake active task", cwd: root, profile: "inspect" },
     });
     workerPid = JSON.parse(result.result.content[0].text).pid;
     server.child.kill("SIGTERM");
@@ -287,7 +285,7 @@ test("MCP negotiates Roots without blocking discovery or spawning Pi", async () 
     await initialize(server, { roots: { listChanged: true } });
     const catalog = await server.request("tools/list");
     assert.equal(catalog.result.tools.length, 6);
-    const denied = await server.request("tools/call", { name: "pi_spawn", arguments: { task: "must be denied", cwd: root, mode: "direct", profile: "inspect" } });
+    const denied = await server.request("tools/call", { name: "pi_spawn", arguments: { task: "must be denied", cwd: root, profile: "inspect" } });
     assert.equal(denied.result.isError, true);
     assert.match(denied.result.content[0].text, /outside PI_WORKER_ALLOWED_ROOTS/);
     const listed = await server.request("tools/call", { name: "pi_list", arguments: {} });
@@ -302,7 +300,7 @@ test("explicit Worker roots cannot be widened by Host Roots", async () => {
   const server = startServer("normal", { allowedRoots: root, roots: () => [pathToFileURL("/").href] });
   try {
     await initialize(server, { roots: { listChanged: true } });
-    const denied = await server.request("tools/call", { name: "pi_spawn", arguments: { task: "must be denied", cwd: "/", mode: "direct", profile: "inspect" } });
+    const denied = await server.request("tools/call", { name: "pi_spawn", arguments: { task: "must be denied", cwd: "/", profile: "inspect" } });
     assert.equal(denied.result.isError, true);
     assert.match(denied.result.content[0].text, /outside PI_WORKER_ALLOWED_ROOTS/);
   } finally {

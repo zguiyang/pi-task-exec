@@ -9,7 +9,6 @@ export type WorkerStatus =
   | "aborted"
   | "crashed";
 
-export type WorkerMode = "direct" | "worktree";
 export type WorkerProfile = "inspect" | "implement";
 
 export interface WorkerFailure {
@@ -29,7 +28,6 @@ export interface WorkerSnapshot {
   id: string;
   task: string;
   cwd: string;
-  mode: WorkerMode;
   profile: WorkerProfile;
   requestedModel?: string;
   effectiveModel?: { provider: string; id: string };
@@ -73,7 +71,6 @@ export interface WorkerConfig {
   taskTimeoutMs: number;
   abortGraceMs: number;
   termGraceMs: number;
-  worktreeSetupTimeoutMs: number;
   maxRecentEvents: number;
 }
 
@@ -83,6 +80,5 @@ export const DEFAULT_WORKER_CONFIG: WorkerConfig = {
   taskTimeoutMs: 60 * 60_000,
   abortGraceMs: 2_000,
   termGraceMs: 2_000,
-  worktreeSetupTimeoutMs: 30_000,
   maxRecentEvents: 40,
 };

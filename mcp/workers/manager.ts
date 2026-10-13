@@ -1,10 +1,9 @@
-import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { mkdir, realpath, stat } from "node:fs/promises";
-import { delimiter, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { realpath, stat } from "node:fs/promises";
+import { delimiter, isAbsolute, relative, resolve, sep } from "node:path";
 import { PiRpcWorker } from "../rpc/pi-rpc.js";
-import type { WorkerConfig, WorkerMode, WorkerProfile, WorkerSnapshot } from "./types.js";
+import type { WorkerConfig, WorkerProfile, WorkerSnapshot } from "./types.js";
 import { DEFAULT_WORKER_CONFIG } from "./types.js";
 
 function environmentNumber(name: string, fallback: number, minimum = 1, maximum = 2_147_000_000): number {
@@ -20,7 +19,6 @@ function readConfig(): WorkerConfig {
     taskTimeoutMs: environmentNumber("PI_WORKER_TASK_TIMEOUT_MS", legacyTaskTimeout),
     abortGraceMs: environmentNumber("PI_WORKER_ABORT_GRACE_MS", DEFAULT_WORKER_CONFIG.abortGraceMs, 0),
     termGraceMs: environmentNumber("PI_WORKER_TERM_GRACE_MS", DEFAULT_WORKER_CONFIG.termGraceMs, 0),
-    worktreeSetupTimeoutMs: environmentNumber("PI_WORKER_WORKTREE_TIMEOUT_MS", DEFAULT_WORKER_CONFIG.worktreeSetupTimeoutMs),
     maxRecentEvents: environmentNumber("PI_WORKER_MAX_RECENT_EVENTS", DEFAULT_WORKER_CONFIG.maxRecentEvents, 1, 1_000),
   };
 }
@@ -56,7 +54,7 @@ export class WorkerManager {
     return pending;
   }
 
-  async spawn(input: { task: string; cwd: string; mode: WorkerMode; profile: WorkerProfile; taskTimeoutMs?: number | undefined; model?: string | undefined }) {
+  async spawn(input: { task: string; cwd: string; profile: WorkerProfile; taskTimeoutMs?: number | undefined; model?: string | undefined }) {
     if (this.shuttingDown) throw new Error("MCP server is shutting down and cannot start workers");
     const active = [...this.workers.values()].filter((worker) => worker.isLive()).length;
     if (active + this.spawning >= this.maxWorkers) {
@@ -65,19 +63,15 @@ export class WorkerManager {
     this.spawning++;
     let reservationHeld = true;
     try {
-      const sourceCwd = await this.assertAllowedDirectory(input.cwd);
+      const workerCwd = await this.assertAllowedDirectory(input.cwd);
       if (this.shuttingDown) throw new Error("MCP server is shutting down and cannot start workers");
       const id = randomUUID();
-      let workerCwd = sourceCwd;
-      if (input.mode === "worktree") workerCwd = await this.createWorktree(sourceCwd, id);
-      if (this.shuttingDown) throw new Error("MCP server is shutting down and cannot start workers");
 
       const now = new Date().toISOString();
       const snapshot: WorkerSnapshot = {
         id,
         task: input.task,
         cwd: workerCwd,
-        mode: input.mode,
         profile: input.profile,
         ...(input.model !== undefined ? { requestedModel: input.model } : {}),
         sessionMode: "no-session",
@@ -181,17 +175,4 @@ export class WorkerManager {
     return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
   }
 
-  private async createWorktree(sourceCwd: string, id: string): Promise<string> {
-    const timeout = this.config.worktreeSetupTimeoutMs;
-    const topLevel = execFileSync("git", ["-C", sourceCwd, "rev-parse", "--show-toplevel"], { encoding: "utf8", timeout }).trim();
-    const prefix = execFileSync("git", ["-C", sourceCwd, "rev-parse", "--show-prefix"], { encoding: "utf8", timeout }).trim();
-    const safeId = id.replaceAll("-", "").slice(0, 12);
-    const base = join(topLevel, ".pi-task-exec", "worktrees");
-    const path = join(base, safeId);
-    const branch = `pi-task-exec/${safeId}`;
-    await mkdir(base, { recursive: true });
-    if (this.shuttingDown) throw new Error("MCP server is shutting down and cannot start workers");
-    execFileSync("git", ["-C", topLevel, "worktree", "add", "-b", branch, path, "HEAD"], { stdio: "pipe", timeout });
-    return prefix ? join(path, prefix) : path;
-  }
 }

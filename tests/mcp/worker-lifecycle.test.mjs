@@ -50,7 +50,7 @@ async function waitFor(read, predicate, timeoutMs = 2_000) {
 }
 
 async function spawn(taskTimeoutMs = 2_000, model) {
-  return manager.spawn({ task: "safe fake task", cwd: root, mode: "direct", profile: "inspect", taskTimeoutMs, ...(model !== undefined ? { model } : {}) });
+  return manager.spawn({ task: "safe fake task", cwd: root, profile: "inspect", taskTimeoutMs, ...(model !== undefined ? { model } : {}) });
 }
 
 async function requests() {
@@ -242,13 +242,13 @@ test("allowed-root containment accepts the root and descendants, and rejects esc
   configure("normal", { allowedRoot: allowed, maxWorkers: 8 });
   try {
     for (const cwd of [allowed, child, deeper]) {
-      const worker = await manager.spawn({ task: "allowed path", cwd, mode: "direct", profile: "inspect" });
+      const worker = await manager.spawn({ task: "allowed path", cwd, profile: "inspect" });
       assert.equal(worker.cwd, await realpath(cwd));
       await manager.abort(worker.id);
     }
     for (const cwd of [prefixSibling, outside, join(allowed, "..", "outside")]) {
       await assert.rejects(
-        manager.spawn({ task: "escaped path", cwd, mode: "direct", profile: "inspect" }),
+        manager.spawn({ task: "escaped path", cwd, profile: "inspect" }),
         (error) => /outside PI_WORKER_ALLOWED_ROOTS/.test(error.message) && /inside an allowed root/.test(error.message),
       );
     }
@@ -268,7 +268,7 @@ test("allowed-root containment resolves a symlink before checking the boundary",
   configure("normal", { allowedRoot: allowed });
   try {
     await assert.rejects(
-      manager.spawn({ task: "symlink escape", cwd: join(allowed, "escape"), mode: "direct", profile: "inspect" }),
+      manager.spawn({ task: "symlink escape", cwd: join(allowed, "escape"), profile: "inspect" }),
       (error) => /outside PI_WORKER_ALLOWED_ROOTS/.test(error.message) && /configure PI_WORKER_ALLOWED_ROOTS/.test(error.message),
     );
     assert.equal(manager.list().length, 0);
