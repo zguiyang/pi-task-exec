@@ -16,7 +16,12 @@ if (mode === "stdout_closed") {
   process.stdout.end();
   setInterval(() => {}, 1_000);
 }
-if (mode === "abort_stuck") {
+if (mode === "abort_stuck" || mode === "stubborn") {
+  process.on("SIGTERM", () => {});
+  process.on("SIGINT", () => {});
+}
+if (mode === "stubborn_alive") {
+  setInterval(() => {}, 1_000);
   process.on("SIGTERM", () => {});
   process.on("SIGINT", () => {});
 }
@@ -25,26 +30,144 @@ function send(record) {
   process.stdout.write(`${JSON.stringify(record)}\n`);
 }
 
-function queueUpdate() {
-  send({ type: "queue_update", steering: [], followUp: [...followUpQueue] });
+function queueUpdate(steering = []) {
+  send({ type: "queue_update", steering: [...steering], followUp: [...followUpQueue] });
 }
 
-// A real Pi processes queued follow-ups before it can emit agent_settled. Model one-at-a-time delivery so the queue
-// drains inside the same activity cycle instead of starting a new run.
-function finishCycle() {
-  if (followUpQueue.length > 0) {
+function userMessage(text) {
+  send({ type: "message_start", message: { role: "user", content: [{ type: "text", text }] } });
+}
+
+function assistantMessage(text, { stopReason = "stop", errorMessage, deltas = [] } = {}) {
+  send({ type: "message_start", message: { role: "assistant", content: [] } });
+  for (const delta of deltas) {
+    // Mirrors toJsonEvent: message_update carries only assistantMessageEvent, not the message.
+    send({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta } });
+  }
+  send({
+    type: "message_end",
+    message: {
+      role: "assistant",
+      content: [{ type: "text", text }],
+      stopReason,
+      ...(errorMessage !== undefined ? { errorMessage } : {}),
+    },
+  });
+}
+
+function longText() {
+  const length = Number(process.env.FAKE_PI_TEXT_LENGTH ?? 50_000);
+  return "x".repeat(Math.max(0, length));
+}
+
+// Real Pi drains all queued follow-ups inside one low-level run: it emits
+// queue_update (with the message already removed) BEFORE the delivered
+// message_start(user). There is exactly one agent_settled per run.
+function finishRun() {
+  while (followUpQueue.length > 0) {
     followUpQueue.shift();
     queueUpdate();
-    send({ type: "agent_start" });
-    setTimeout(finishCycle, 5);
-    return;
+    userMessage("queued follow-up");
   }
-  queueUpdate();
-  send({ type: "agent_settled" });
+  send({ type: "agent_end", willRetry: false, messages: [] });
+  send({ type: "agent_settled", aborted: false });
 }
 
-function startRun() {
+function runPrompt(text, isFirstRun) {
   send({ type: "agent_start" });
+  userMessage(text);
+  if (mode === "silent" || mode === "stubborn_alive") return;
+  if (mode === "stdin_closed") {
+    setTimeout(() => process.stdin.destroy(), 10);
+    return;
+  }
+  if (mode === "abort_stuck" || mode === "stubborn") return;
+  if (mode === "crash_after_spawn") {
+    setTimeout(() => process.exit(7), 30);
+    return;
+  }
+  if (mode === "orphan_descendant") {
+    const descendant = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+    process.stderr.write(`DESCENDANT_PID=${descendant.pid}\n`);
+    setTimeout(() => process.exit(0), 120);
+    return;
+  }
+  if (mode === "tool_active") {
+    send({ type: "tool_execution_start", toolCallId: "call-1", toolName: "bash", args: { command: "sleep" } });
+    return;
+  }
+  if (mode === "forked") {
+    const descendant = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+    process.stderr.write(`DESCENDANT_PID=${descendant.pid}\n`);
+    return;
+  }
+  if (mode === "steer_then_follow_up" && isFirstRun) return;
+  if (mode === "deltas") {
+    assistantMessage("authoritative full text", { deltas: ["streamed ", "draft ", "only"] });
+    finishRun();
+    return;
+  }
+  if (mode === "long_result") {
+    assistantMessage(longText());
+    finishRun();
+    return;
+  }
+  if (mode === "agent_error_settle") {
+    assistantMessage("", { stopReason: "error", errorMessage: "non-retry model failure" });
+    finishRun();
+    return;
+  }
+  if (mode === "length_stop") {
+    assistantMessage("partial answer only", { stopReason: "length" });
+    finishRun();
+    return;
+  }
+  if (mode === "assistant_aborted") {
+    assistantMessage("", { stopReason: "aborted" });
+    finishRun();
+    return;
+  }
+  if (mode === "secret_error") {
+    assistantMessage("", { stopReason: "error", errorMessage: "auth failed for sk-ABCDEFGHIJKLMNOP" });
+    finishRun();
+    return;
+  }
+  if (mode === "secret_stderr") {
+    process.stderr.write("token=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345\n");
+    assistantMessage("stdout stays clean");
+    finishRun();
+    return;
+  }
+  if (mode === "retry_success") {
+    assistantMessage("", { stopReason: "error", errorMessage: "transient provider error" });
+    send({ type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 1, errorMessage: "transient provider error" });
+    assistantMessage("recovered answer");
+    send({ type: "auto_retry_end", success: true, attempt: 1 });
+    finishRun();
+    return;
+  }
+  if (mode === "retry_failure") {
+    assistantMessage("", { stopReason: "error", errorMessage: "provider unavailable" });
+    send({ type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 1, errorMessage: "provider unavailable" });
+    assistantMessage("", { stopReason: "error", errorMessage: "provider unavailable" });
+    send({ type: "auto_retry_end", success: false, attempt: 1, finalError: "provider unavailable" });
+    finishRun();
+    return;
+  }
+  if (mode === "agent_failure") {
+    send({ type: "auto_retry_end", success: false, attempt: 1, finalError: "provider unavailable" });
+    finishRun();
+    return;
+  }
+  if (mode === "follow_up_running") {
+    setTimeout(() => {
+      process.stderr.write("FIRST_TURN_FINISHED\n");
+      finishRun();
+    }, 300);
+    return;
+  }
+  assistantMessage("safe fake task complete");
+  setTimeout(finishRun, mode === "normal" || mode === "normal_follow_up" || mode === "follow_up_handled" ? 15 : 0);
 }
 
 const input = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
@@ -88,38 +211,16 @@ input.on("line", (line) => {
     process.stdout.write(`${JSON.stringify({ type: "response", id: request.id, success: true, data: { disposition } })}\n`);
     if (disposition === "handled") return;
     hasRun = true;
-    startRun();
-    if (mode === "forked") {
-      const descendant = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
-      process.stderr.write(`DESCENDANT_PID=${descendant.pid}\n`);
-    }
-    if (mode === "tool_active") {
-      process.stdout.write(`${JSON.stringify({ type: "tool_execution_start", toolCallId: "call-1", toolName: "bash", args: { command: "sleep" } })}\n`);
-    }
-    if (mode === "agent_failure") {
-      process.stdout.write(`${JSON.stringify({ type: "auto_retry_end", success: false, finalError: "provider unavailable" })}\n`);
-      process.stdout.write(`${JSON.stringify({ type: "agent_settled" })}\n`);
-      return;
-    }
-    if (mode === "stdin_closed") setTimeout(() => process.stdin.destroy(), 10);
-    if (mode === "normal" || mode === "normal_follow_up" || mode === "follow_up_handled") {
-      setTimeout(finishCycle, 15);
-    }
-    if (mode === "follow_up_running") {
-      setTimeout(() => {
-        process.stderr.write("FIRST_TURN_FINISHED\n");
-        finishCycle();
-      }, 300);
-    }
-    if (mode === "steer_then_follow_up" && !isFirstRun) {
-      setTimeout(finishCycle, 15);
-    }
+    runPrompt(request.message, isFirstRun);
     return;
   }
   if (request.type === "steer") {
     process.stdout.write(`${JSON.stringify({ type: "response", id: request.id, success: true })}\n`);
     if (mode === "steer_then_follow_up") {
-      setTimeout(finishCycle, 10);
+      queueUpdate([request.message]);
+      userMessage(request.message);
+      assistantMessage("safe fake task complete");
+      setTimeout(finishRun, 10);
     }
     return;
   }
@@ -127,8 +228,7 @@ input.on("line", (line) => {
     const disposition = mode === "follow_up_handled" ? "handled" : "queued";
     process.stdout.write(`${JSON.stringify({ type: "response", id: request.id, success: true, data: { disposition } })}\n`);
     if (disposition === "handled") return;
-    // Pi only queues follow-ups for the active run. While idle it stores the message and emits no run events, so an
-    // idle follow_up can never auto-start or auto-settle. The active cycle drains queued messages in finishCycle.
+    // Pi only queues follow-ups for the active run. While idle it stores the message and emits no run events.
     followUpQueue.push(request.message);
     queueUpdate();
     return;
@@ -136,8 +236,10 @@ input.on("line", (line) => {
   if (request.type === "abort" && mode === "abort_exit") {
     process.exit(0);
   }
-  if (request.type === "abort" && mode !== "abort_stuck") {
+  if (request.type === "abort" && mode !== "abort_stuck" && mode !== "stubborn" && mode !== "stubborn_alive") {
     process.stdout.write(`${JSON.stringify({ type: "response", id: request.id, success: true })}\n`);
-    process.stdout.write(`${JSON.stringify({ type: "agent_settled" })}\n`);
+    followUpQueue.length = 0;
+    send({ type: "agent_end", willRetry: false, messages: [] });
+    send({ type: "agent_settled", aborted: true });
   }
 });

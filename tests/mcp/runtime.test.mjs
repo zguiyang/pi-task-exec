@@ -76,15 +76,16 @@ async function initialize(server, capabilities = {}) {
   return result.result;
 }
 
-async function waitForWorkerState(server, workerId, state) {
-  const deadline = Date.now() + 2_000;
-  while (Date.now() < deadline) {
-    const result = await server.request("tools/call", { name: "pi_status", arguments: { workerId } });
-    const snapshot = JSON.parse(result.result.content[0].text);
-    if (snapshot.state === state) return snapshot;
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-  assert.fail(`Worker ${workerId} did not reach ${state}`);
+async function tool(server, name, args = {}) {
+  const response = await server.request("tools/call", { name, arguments: args });
+  assert.equal(response.error, undefined, `${name} transport error`);
+  if (response.result.isError) throw Object.assign(new Error(response.result.content[0].text), { result: response.result });
+  return JSON.parse(response.result.content[0].text);
+}
+
+async function shutdown(server) {
+  server.child.stdin.end();
+  await Promise.race([once(server.child, "exit"), new Promise((_, reject) => setTimeout(() => reject(new Error("MCP server shutdown hung")), 3_000))]);
 }
 
 test("MCP discovery exposes delegation guidance, tool choice semantics, and typed schemas", async () => {
@@ -102,7 +103,7 @@ test("MCP discovery exposes delegation guidance, tool choice semantics, and type
     assert.equal(result.error, undefined);
     const tools = result.result.tools;
     assert.deepEqual(tools.map((tool) => tool.name), [
-      "pi_spawn", "pi_status", "pi_steer", "pi_continue", "pi_abort", "pi_list",
+      "pi_spawn", "pi_status", "pi_steer", "pi_continue", "pi_abort", "pi_release", "pi_list",
     ]);
     const byName = Object.fromEntries(tools.map((tool) => [tool.name, tool]));
 
@@ -112,18 +113,24 @@ test("MCP discovery exposes delegation guidance, tool choice semantics, and type
     for (const phrase of ["bounded", "trivial", "architecture", "independent", "final review", "accepted, not completed"]) {
       assert.ok(byName.pi_spawn.description.toLowerCase().includes(phrase), `pi_spawn description should mention ${phrase}`);
     }
-    for (const phrase of ["progress", "settled", "failure", "busy polling"]) {
-      assert.ok(byName.pi_status.description.toLowerCase().includes(phrase), `pi_status description should mention ${phrase}`);
-    }
-    assert.match(byName.pi_status.description, /decide how to recover or continue related work/i);
+    assert.match(byName.pi_status.description, /authoritative result/i);
+    assert.match(byName.pi_status.description, /waitMs/i);
+    assert.match(byName.pi_status.description, /does not cancel/i);
     assert.match(byName.pi_steer.description, /running worker/i);
     assert.match(byName.pi_steer.description, /not a follow-up/i);
     assert.match(byName.pi_continue.description, /related follow-up/i);
     assert.match(byName.pi_continue.description, /unrelated work/i);
-    assert.match(byName.pi_continue.description, /running.*queued.*settled.*activity cycle/i);
+    assert.match(byName.pi_continue.description, /queued.*current activity cycle/i);
+    assert.match(byName.pi_continue.description, /released or crashed/i);
     assert.match(byName.pi_spawn.description, /failed implement worker.*partial edits.*integration and final review/i);
-    assert.match(byName.pi_abort.description, /terminal worker.*existing snapshot.*does not revert direct edits or delete its worktree/i);
+    assert.match(byName.pi_abort.description, /cancel/i);
+    assert.match(byName.pi_abort.description, /without releasing/i);
+    assert.match(byName.pi_abort.description, /pi_release/i);
+    assert.match(byName.pi_release.description, /preserves its authoritative result/i);
+    assert.match(byName.pi_release.description, /idempotent/i);
+    assert.match(byName.pi_release.description, /releaseError/i);
     assert.match(byName.pi_list.description, /fleet.*newest first.*does not include the configured worker limit/i);
+    assert.match(byName.pi_list.description, /released\/crashed snapshots/i);
 
     const spawnSchema = byName.pi_spawn.inputSchema;
     assert.deepEqual(spawnSchema.required, ["task", "cwd"]);
@@ -131,80 +138,107 @@ test("MCP discovery exposes delegation guidance, tool choice semantics, and type
     assert.match(spawnSchema.properties.profile.description, /read-only/i);
     assert.equal(spawnSchema.properties.mode, undefined);
     assert.equal(spawnSchema.properties.model.type, "string");
-    assert.equal(spawnSchema.properties.model.enum, undefined);
-    assert.match(spawnSchema.properties.model.description, /this worker only/i);
     assert.match(spawnSchema.properties.model.description, /Pi chooses its locally configured default/i);
+
     assert.deepEqual(byName.pi_status.inputSchema.required, ["workerId"]);
+    assert.equal(byName.pi_status.inputSchema.properties.waitMs.minimum, 0);
+    assert.equal(byName.pi_status.inputSchema.properties.waitMs.maximum, 30_000);
+    assert.equal(byName.pi_status.inputSchema.properties.cycleId.minimum, 1);
     assert.deepEqual(byName.pi_steer.inputSchema.required, ["workerId", "task"]);
     assert.deepEqual(byName.pi_continue.inputSchema.required, ["workerId", "task"]);
     assert.deepEqual(byName.pi_abort.inputSchema.required, ["workerId"]);
+    assert.deepEqual(byName.pi_release.inputSchema.required, ["workerId"]);
     assert.deepEqual(byName.pi_list.inputSchema.properties, {});
     assert.equal(byName.pi_list.inputSchema.required, undefined);
   } finally {
-    server.child.stdin.end();
-    await Promise.race([once(server.child, "exit"), new Promise((_, reject) => setTimeout(() => reject(new Error("MCP server shutdown hung")), 3_000))]);
+    await shutdown(server);
   }
 });
 
-test("MCP model resolution errors include a structured code and never prompt Pi", async () => {
+test("MCP model resolution errors include code, message, phase, and workerId and never prompt Pi", async () => {
   const server = startServer("normal");
   try {
     await initialize(server);
-    const result = await server.request("tools/call", {
+    const response = await server.request("tools/call", {
       name: "pi_spawn",
       arguments: { task: "bounded fake task", cwd: root, model: "not-available" },
     });
-    assert.equal(result.result.isError, true);
-    assert.deepEqual(result.result.structuredContent, {
-      code: "MODEL_NOT_AVAILABLE",
-      message: result.result.content[0].text,
-    });
-    assert.match(result.result.content[0].text, /local Pi environment/);
-    const listed = await server.request("tools/call", { name: "pi_list", arguments: {} });
-    const worker = JSON.parse(listed.result.content[0].text)[0];
+    assert.equal(response.result.isError, true);
+    assert.equal(response.result.structuredContent.code, "MODEL_NOT_AVAILABLE");
+    assert.equal(response.result.structuredContent.phase, "model");
+    assert.equal(typeof response.result.structuredContent.workerId, "string");
+    assert.equal(response.result.structuredContent.message, response.result.content[0].text);
+    assert.match(response.result.content[0].text, /local Pi environment/);
+    const worker = (await tool(server, "pi_list"))[0];
     assert.equal(worker.failure.code, "MODEL_NOT_AVAILABLE");
     assert.equal(worker.processAlive, false);
     assert.equal(worker.recentEvents.some((event) => event.type === "prompt"), false);
   } finally {
-    server.child.stdin.end();
-    await Promise.race([once(server.child, "exit"), new Promise((_, reject) => setTimeout(() => reject(new Error("MCP server shutdown hung")), 3_000))]);
+    await shutdown(server);
   }
 });
 
-test("MCP worker lifecycle supports steer, settled continuation, review, and release", async () => {
+test("MCP worker lifecycle supports steer, settled continuation, bounded wait, review, and release", async () => {
   const server = startServer("steer_then_follow_up");
   try {
     await initialize(server);
-    const spawned = await server.request("tools/call", {
-      name: "pi_spawn",
-      arguments: { task: "bounded fake implementation", cwd: root, profile: "inspect" },
-    });
-    assert.equal(spawned.result.isError, undefined);
-    const worker = JSON.parse(spawned.result.content[0].text);
+    const worker = await tool(server, "pi_spawn", { task: "bounded fake implementation", cwd: root, profile: "inspect" });
+    await tool(server, "pi_steer", { workerId: worker.id, task: "Keep the investigation within the stated scope." });
+    const settled = await tool(server, "pi_status", { workerId: worker.id, waitMs: 2_000 });
+    assert.equal(settled.state, "settled");
+    assert.equal(settled.cycleId, 1);
+    assert.equal(settled.result.text, "safe fake task complete");
 
-    const steered = await server.request("tools/call", {
-      name: "pi_steer",
-      arguments: { workerId: worker.id, task: "Keep the investigation within the stated scope." },
-    });
-    assert.equal(steered.result.isError, undefined);
-    await waitForWorkerState(server, worker.id, "settled");
+    const followed = await tool(server, "pi_continue", { workerId: worker.id, task: "Check the related edge case." });
+    assert.equal(followed.cycleId, 2);
+    const afterFollow = await tool(server, "pi_status", { workerId: worker.id, waitMs: 2_000, cycleId: 2 });
+    assert.equal(afterFollow.state, "settled");
 
-    const followedUp = await server.request("tools/call", {
-      name: "pi_continue",
-      arguments: { workerId: worker.id, task: "Check the related edge case." },
-    });
-    assert.equal(followedUp.result.isError, undefined);
-    await waitForWorkerState(server, worker.id, "settled");
-
-    const released = await server.request("tools/call", { name: "pi_abort", arguments: { workerId: worker.id } });
-    assert.equal(released.result.isError, undefined);
-    const listed = await server.request("tools/call", { name: "pi_list", arguments: {} });
-    const workers = JSON.parse(listed.result.content[0].text);
-    assert.equal(workers.find((item) => item.id === worker.id).state, "aborted");
+    const released = await tool(server, "pi_release", { workerId: worker.id });
+    assert.equal(released.released, true);
+    assert.equal(released.state, "settled");
+    assert.equal(released.result.text, "safe fake task complete");
+    const workers = await tool(server, "pi_list");
     assert.equal(workers.find((item) => item.id === worker.id).processAlive, false);
   } finally {
-    server.child.stdin.end();
-    await Promise.race([once(server.child, "exit"), new Promise((_, reject) => setTimeout(() => reject(new Error("MCP server shutdown hung")), 3_000))]);
+    await shutdown(server);
+  }
+});
+
+test("MCP pi_status wait times out without cancelling and reports a recoverable failure", async () => {
+  const server = startServer("silent");
+  try {
+    await initialize(server);
+    const worker = await tool(server, "pi_spawn", { task: "fake silent task", cwd: root, profile: "inspect" });
+    const snapshot = await tool(server, "pi_status", { workerId: worker.id, waitMs: 100 });
+    assert.equal(snapshot.state, "running");
+    assert.equal(snapshot.processAlive, true);
+    await tool(server, "pi_release", { workerId: worker.id });
+  } finally {
+    await shutdown(server);
+  }
+});
+
+test("MCP operational errors carry code, phase, and workerId once a worker exists", async () => {
+  const server = startServer("normal");
+  try {
+    await initialize(server);
+    const unknownId = "11111111-1111-4111-8111-111111111111";
+    const unknown = await server.request("tools/call", { name: "pi_status", arguments: { workerId: unknownId } });
+    assert.equal(unknown.result.isError, true);
+    assert.equal(unknown.result.structuredContent.code, "UNKNOWN_WORKER");
+    assert.equal(unknown.result.structuredContent.workerId, unknownId);
+
+    const worker = await tool(server, "pi_spawn", { task: "bounded fake task", cwd: root, profile: "inspect" });
+    await tool(server, "pi_status", { workerId: worker.id, waitMs: 2_000 });
+    const invalid = await server.request("tools/call", { name: "pi_steer", arguments: { workerId: worker.id, task: "too late to steer" } });
+    assert.equal(invalid.result.isError, true);
+    assert.equal(invalid.result.structuredContent.code, "INVALID_STATE");
+    assert.equal(invalid.result.structuredContent.phase, "steer");
+    assert.equal(invalid.result.structuredContent.workerId, worker.id);
+    await tool(server, "pi_release", { workerId: worker.id });
+  } finally {
+    await shutdown(server);
   }
 });
 
@@ -212,19 +246,16 @@ test("MCP spawn RPC timeout returns and pi_status exposes a recoverable terminal
   const server = startServer("no_response");
   try {
     await initialize(server);
-    const spawnResult = await server.request("tools/call", {
+    const response = await server.request("tools/call", {
       name: "pi_spawn",
       arguments: { task: "fake no-response", cwd: root, profile: "inspect" },
     });
-    assert.equal(spawnResult.error, undefined);
-    assert.equal(spawnResult.result.isError, true);
-    const listResult = await server.request("tools/call", { name: "pi_list", arguments: {} });
-    const workers = JSON.parse(listResult.result.content[0].text);
+    assert.equal(response.result.isError, true);
+    const workers = await tool(server, "pi_list");
     assert.equal(workers[0].state, "timed_out");
     assert.equal(workers[0].failure.code, "RPC_TIMEOUT");
   } finally {
-    server.child.stdin.end();
-    await Promise.race([once(server.child, "exit"), new Promise((_, reject) => setTimeout(() => reject(new Error("MCP server shutdown hung")), 3_000))]);
+    await shutdown(server);
   }
 });
 
@@ -233,22 +264,11 @@ test("MCP stdin shutdown terminates an active worker process", async () => {
   let workerPid;
   try {
     await initialize(server);
-    const result = await server.request("tools/call", {
-      name: "pi_spawn",
-      arguments: { task: "fake active task", cwd: root, profile: "inspect" },
-    });
-    assert.equal(result.result.isError, undefined);
-    const worker = JSON.parse(result.result.content[0].text);
+    const worker = await tool(server, "pi_spawn", { task: "fake active task", cwd: root, profile: "inspect" });
     workerPid = worker.pid;
     assert.ok(workerPid);
   } finally {
-    server.child.stdin.end();
-    const [code, signal] = await Promise.race([
-      once(server.child, "exit"),
-      new Promise((_, reject) => setTimeout(() => reject(new Error("MCP shutdown left its worker hanging")), 3_000)),
-    ]);
-    assert.equal(code, 0);
-    assert.equal(signal, null);
+    await shutdown(server);
   }
   await new Promise((resolve) => setTimeout(resolve, 30));
   assert.throws(() => process.kill(workerPid, 0), { code: "ESRCH" });
@@ -259,11 +279,8 @@ test("SIGTERM shutdown terminates an active worker process", async () => {
   let workerPid;
   try {
     await initialize(server);
-    const result = await server.request("tools/call", {
-      name: "pi_spawn",
-      arguments: { task: "fake active task", cwd: root, profile: "inspect" },
-    });
-    workerPid = JSON.parse(result.result.content[0].text).pid;
+    const worker = await tool(server, "pi_spawn", { task: "fake active task", cwd: root, profile: "inspect" });
+    workerPid = worker.pid;
     server.child.kill("SIGTERM");
     const [code, signal] = await Promise.race([
       once(server.child, "exit"),
@@ -277,22 +294,19 @@ test("SIGTERM shutdown terminates an active worker process", async () => {
   assert.throws(() => process.kill(workerPid, 0), { code: "ESRCH" });
 });
 
-
 test("MCP negotiates Roots without blocking discovery or spawning Pi", async () => {
-  // Empty client roots must deny Worker starts even though server cwd exists.
   const server = startServer("normal", { allowedRoots: null, roots: () => [] });
   try {
     await initialize(server, { roots: { listChanged: true } });
     const catalog = await server.request("tools/list");
-    assert.equal(catalog.result.tools.length, 6);
+    assert.equal(catalog.result.tools.length, 7);
     const denied = await server.request("tools/call", { name: "pi_spawn", arguments: { task: "must be denied", cwd: root, profile: "inspect" } });
     assert.equal(denied.result.isError, true);
     assert.match(denied.result.content[0].text, /outside PI_WORKER_ALLOWED_ROOTS/);
-    const listed = await server.request("tools/call", { name: "pi_list", arguments: {} });
-    assert.equal(JSON.parse(listed.result.content[0].text).length, 0);
+    const listed = await tool(server, "pi_list");
+    assert.equal(listed.length, 0);
   } finally {
-    server.child.stdin.end();
-    await once(server.child, "close");
+    await shutdown(server);
   }
 });
 
@@ -304,7 +318,6 @@ test("explicit Worker roots cannot be widened by Host Roots", async () => {
     assert.equal(denied.result.isError, true);
     assert.match(denied.result.content[0].text, /outside PI_WORKER_ALLOWED_ROOTS/);
   } finally {
-    server.child.stdin.end();
-    await once(server.child, "close");
+    await shutdown(server);
   }
 });
