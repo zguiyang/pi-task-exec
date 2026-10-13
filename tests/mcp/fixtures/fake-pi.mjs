@@ -6,6 +6,8 @@ import { appendFileSync } from "node:fs";
 const mode = process.env.FAKE_PI_MODE ?? "normal";
 const models = JSON.parse(process.env.FAKE_PI_MODELS ?? '[{"provider":"provider-a","id":"foo"},{"provider":"provider-b","id":"foo"},{"provider":"provider-x","id":"X"},{"provider":"provider-y","id":"Y"}]');
 let currentModel = JSON.parse(process.env.FAKE_PI_DEFAULT_MODEL ?? '{"provider":"local","id":"default"}');
+const thinkingLevels = JSON.parse(process.env.FAKE_PI_THINKING_LEVELS ?? '["off","minimal","low","medium","high"]');
+let currentThinking = process.env.FAKE_PI_THINKING ?? "high";
 let hasRun = false;
 const followUpQueue = [];
 
@@ -65,9 +67,28 @@ input.on("line", (line) => {
     process.stdout.write(`${JSON.stringify({ type: "response", id: request.id, success: true, data: currentModel })}\n`);
     return;
   }
+  if (request.type === "get_available_thinking_levels") {
+    const levels = mode === "thinking_no_support" ? ["off"] : thinkingLevels;
+    process.stdout.write(`${JSON.stringify({ type: "response", id: request.id, success: true, data: { levels } })}\n`);
+    return;
+  }
+  if (request.type === "set_thinking_level") {
+    if (mode === "thinking_reject") {
+      process.stdout.write(`${JSON.stringify({ type: "response", id: request.id, success: false, error: "Pi refused thinking level" })}\n`);
+      return;
+    }
+    if (mode === "thinking_mismatch") {
+      process.stdout.write(`${JSON.stringify({ type: "response", id: request.id, success: true })}\n`);
+      return;
+    }
+    currentThinking = mode === "thinking_clamp" ? "low" : request.level;
+    process.stdout.write(`${JSON.stringify({ type: "response", id: request.id, success: true })}\n`);
+    return;
+  }
   if (request.type === "get_state") {
     const model = mode === "state_mismatch" ? { provider: "local", id: "wrong" } : currentModel;
-    process.stdout.write(`${JSON.stringify({ type: "response", id: request.id, success: true, data: { model, thinkingLevel: "high" } })}\n`);
+    const thinkingLevel = mode === "thinking_mismatch" ? "low" : currentThinking;
+    process.stdout.write(`${JSON.stringify({ type: "response", id: request.id, success: true, data: { model, thinkingLevel } })}\n`);
     return;
   }
   if (request.type === "prompt") {

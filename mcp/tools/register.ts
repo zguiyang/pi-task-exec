@@ -25,9 +25,10 @@ server.registerTool(
       task: z.string().min(1).max(20_000).describe("One bounded task with a clear scope and expected result."),
       cwd: z.string().min(1).describe("Absolute working directory inside PI_WORKER_ALLOWED_ROOTS."),
       mode: z.enum(["direct", "worktree"]).describe("direct uses this checkout; worktree isolates edits. Parallel implement workers must use separate worktrees."),
-      profile: z.enum(["inspect", "implement"]).default("implement").describe("inspect is read-only and may share a checkout; implement can write files."),
+      profile: z.enum(["inspect", "implement"]).default("inspect").describe("inspect is read-only and may share a checkout; implement can write files."),
       taskTimeoutMs: z.number().int().min(1_000).max(86_400_000).optional().describe("Optional activity-cycle deadline in milliseconds."),
       model: z.string().min(1).optional().describe("Optional model override for this worker only. When omitted, Pi chooses its locally configured default. The value must resolve to a model available in this worker's local Pi environment."),
+      thinking: z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]).optional().describe("Optional reasoning level for this worker only. When omitted, Pi keeps its configured default. Must be supported by the active model; an unsupported level is reported instead of being silently ignored."),
     },
   },
   async (args) => {

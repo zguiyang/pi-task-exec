@@ -69,7 +69,7 @@ async function initialize(server, capabilities = {}) {
   const result = await server.request("initialize", {
     protocolVersion: "2025-03-26",
     capabilities,
-    clientInfo: { name: "pi-task-exec-test", version: "0.2.2" },
+    clientInfo: { name: "pi-task-exec-test", version: "0.3.0" },
   });
   assert.equal(result.error, undefined);
   server.notify("notifications/initialized");
@@ -92,7 +92,7 @@ test("MCP discovery exposes delegation guidance, tool choice semantics, and type
   try {
     const initialized = await initialize(server);
     assert.equal(initialized.serverInfo.name, "pi-task-exec");
-    assert.equal(initialized.serverInfo.version, "0.2.2");
+    assert.equal(initialized.serverInfo.version, "0.3.0");
     assert.match(initialized.instructions, /subordinate coding workers/i);
     assert.match(initialized.instructions, /planning.*architecture.*delegation.*integration.*final review/i);
     assert.match(initialized.instructions, /never recursively delegate/i);
@@ -135,6 +135,9 @@ test("MCP discovery exposes delegation guidance, tool choice semantics, and type
     assert.equal(spawnSchema.properties.model.enum, undefined);
     assert.match(spawnSchema.properties.model.description, /this worker only/i);
     assert.match(spawnSchema.properties.model.description, /Pi chooses its locally configured default/i);
+    assert.deepEqual(spawnSchema.properties.thinking.enum, ["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+    assert.match(spawnSchema.properties.thinking.description, /configured default/i);
+    assert.match(spawnSchema.properties.thinking.description, /unsupported level is reported/i);
     assert.deepEqual(spawnSchema.required, ["task", "cwd", "mode"]);
     assert.deepEqual(byName.pi_status.inputSchema.required, ["workerId"]);
     assert.deepEqual(byName.pi_steer.inputSchema.required, ["workerId", "task"]);

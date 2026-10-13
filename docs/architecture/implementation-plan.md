@@ -1,5 +1,7 @@
 # Pi TaskExec 实施计划
 
+> **已被 v0.3.0 取代（历史设计记录）：** 本文描述的运行时接口属于 v0.3.0 之前的设计（工作进程 `mode`/`direct`/`worktree`、六个 `pi_*` 工具）。自 v0.3.0 起，权威契约为七个工具（新增 `pi_release`）、由主 Agent 指定 `cwd`（无 mode）、以 `cycleId` 标识的活动周期与有界 `result`/`cycles` 归档，以及 `pi_abort`（仅取消，保持进程可续跑）与 `pi_release`（释放）的分离。当前契约见 `skills/pi-delegate/references/mcp-contract.md`。以下阶段记录保留为历史实施证据。
+
 状态（2026-10-09）：阶段 1–8 已实现；阶段 6–8 与选型 A 根级目录重构待 Supervisor 审查；阶段 9A（固定 Skills CLI/GitHub Skill 安装）与阶段 9B（交互 CLI/统一 setup）的基线已提交为 `a8b77e9`，09B 的隔离环境真实 Setup Smoke 已通过并完成清理；阶段 9C（统一 `pi-task-exec update`）仍在 `codex/stage-09a-skills-cli` 工作区未提交并待 Supervisor 审查，09C 的真实 `update` 安装尚未验证；`remove skill` 仍延后；阶段 10–15 未开始；npm 和 MCP Registry 均未发布。
 日期：2026-10-09
 

@@ -22,17 +22,16 @@ views, or suggestions via
 
 ## Highlights
 
-- Runs tasks on local Pi using its locally configured default model.
-- Full worker lifecycle: spawn, status, steer, continue, abort, and list.
-- Read-only `inspect` and read/write `implement` capability profiles.
-- `direct` in-place or isolated `worktree` working-directory modes.
+- Runs tasks on local Pi using its locally configured default model, with optional per-worker `model` and `thinking` overrides.
+- Full worker lifecycle: spawn, status with bounded wait, steer, continue, cancel (`pi_abort`), and release (`pi_release`), plus list.
+- Read-only `inspect` (default) and read/write `implement` capability profiles.
+- The Supervisor chooses the working directory; the MCP verifies authorization but never creates worktrees or branches.
 - One unified MCP + `pi-delegate` Skill setup for Codex, Zed, and OpenCode.
 
 ## Requirements
 
 - Node.js >= 22.20
 - An installed and configured [`pi`](https://pi.dev) executable
-- Git when using `worktree` mode
 
 ## Quick start
 
@@ -41,6 +40,11 @@ From the project you want to configure, run the unified setup:
 ```sh
 npx -y @zguiyang/pi-task-exec@latest setup
 ```
+
+> The v0.3.0 worker interface documented here (seven tools, `thinking`,
+> cycles, `pi_abort`/`pi_release`) becomes usable after v0.3.0 is published;
+> `@latest` currently resolves to v0.2.2, which uses the older `mode`
+> interface.
 
 It prompts for host and scope, prints the planned MCP and Skill writes, and
 asks for confirmation. To specify the selections up front (confirmation still

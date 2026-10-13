@@ -1,5 +1,7 @@
 # Pi TaskExec 风险登记表
 
+> **已被 v0.3.0 取代（历史风险记录）：** 本文中的运行时/工具描述属于 v0.3.0 之前的设计（工作进程 `mode`/`direct`/`worktree`、六个 `pi_*` 工具）。自 v0.3.0 起，权威契约为七个工具（新增 `pi_release`）、由主 Agent 指定 `cwd`（无 mode）、以 `cycleId` 标识的活动周期与有界 `result`/`cycles` 归档，以及 `pi_abort`（仅取消，保持进程可续跑）与 `pi_release`（释放）的分离。当前契约见 `skills/pi-delegate/references/mcp-contract.md`。以下条目作为历史风险证据保留。
+
 状态：审查阶段风险；概率为定性判断，未通过运行时测试量化
 日期：2026-10-08
 

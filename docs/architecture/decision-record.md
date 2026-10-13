@@ -1,5 +1,7 @@
 # Pi TaskExec 架构决策记录
 
+> **已被 v0.3.0 取代（历史设计记录）：** 本文描述的运行时接口属于 v0.3.0 之前的设计（工作进程 `mode`/`direct`/`worktree`、六个 `pi_*` 工具、无 cycle/result/release 语义）。自 v0.3.0 起，权威契约为七个工具（新增 `pi_release`）、由主 Agent 指定 `cwd`（无 mode）、以 `cycleId` 标识的活动周期与有界 `result`/`cycles` 归档，以及 `pi_abort`（仅取消，保持进程可续跑）与 `pi_release`（释放进程与槽位）的分离。当前契约见 `skills/pi-delegate/references/mcp-contract.md`。以下内容作为历史决策证据保留，不再表示当前运行时行为。
+
 状态：架构决策历史记录；阶段 6 的 CLI 与产品标识实现由 2026-10-09 用户授权；2026-10-09 根级目录决策（选型 A）已批准
 日期：2026-10-08
 范围：架构与实施决策；本记录不授权修改运行时代码、Git、npm 或 MCP Registry。

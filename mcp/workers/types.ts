@@ -11,6 +11,8 @@ export type WorkerStatus =
 
 export type WorkerMode = "direct" | "worktree";
 export type WorkerProfile = "inspect" | "implement";
+/** Reasoning levels accepted by Pi 1.1.0 `set_thinking_level`; the active model may support only a subset. */
+export type WorkerThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 export interface WorkerFailure {
   code: string;
@@ -32,6 +34,7 @@ export interface WorkerSnapshot {
   mode: WorkerMode;
   profile: WorkerProfile;
   requestedModel?: string;
+  requestedThinking?: WorkerThinkingLevel;
   effectiveModel?: { provider: string; id: string };
   thinkingLevel?: string;
   sessionMode: "no-session";

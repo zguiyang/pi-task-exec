@@ -50,6 +50,11 @@ command: npx
 args:    -y @zguiyang/pi-task-exec@latest mcp serve
 ```
 
+> **Publication status:** v0.3.0 is not published yet; `@latest` currently
+> resolves to v0.2.2, which uses the older `mode` interface. The v0.3.0
+> interface documented in this guide and in the Skill becomes usable only
+> after v0.3.0 is published.
+
 Add the equivalent entry to each host's config file. Restart the host and
 verify `pi_list` inside it after any change.
 
@@ -104,18 +109,36 @@ without it the plan reports `local_dev_required` and writes nothing.
 
 | Tool | Purpose |
 | --- | --- |
-| `pi_spawn` | Start a bounded worker with a task, cwd, mode, and profile. |
-| `pi_status` | Read a worker's progress and terminal result. |
+| `pi_spawn` | Start a bounded worker with a task, absolute cwd, optional profile, model, thinking, and task timeout. |
+| `pi_status` | Read the current snapshot and optional cycle result, optionally waiting up to 30000 ms. |
 | `pi_steer` | Correct the current task of a running worker. |
-| `pi_continue` | Continue a related follow-up in the same worker. |
-| `pi_abort` | Stop or release a worker. |
+| `pi_continue` | Queue a related follow-up into the running cycle, or start a new cycle once settled/failed. |
+| `pi_abort` | Cancel the running cycle only; keeps the process continuable. |
+| `pi_release` | Terminate the process and free the live-worker slot, preserving a completed result. |
 | `pi_list` | Return a snapshot of live workers. |
 
-Profiles: `inspect` exposes only read-only tools (`read`, `grep`, `find`,
-`ls`); `implement` adds `edit`, `write`, and `bash`. Modes: `direct` writes in
-place; `worktree` creates an isolated Git worktree. A successful spawn or
-continuation means Pi accepted the work, not that the result is correct; the
-supervising agent must inspect results before acceptance.
+Profiles: `inspect` (default) exposes only read-only tools (`read`, `grep`,
+`find`, `ls`); `implement` adds `edit`, `write`, and `bash`. The Supervisor
+chooses `cwd`; the MCP verifies the real path against the allowed roots but
+never creates a worktree or branch. Optional per-worker `model` and `thinking`
+overrides are validated and applied when the worker starts. A successful spawn
+or continuation means Pi accepted the work, not that the result is correct;
+the supervising agent must inspect the authoritative `result` before
+acceptance.
+
+Cycles: each activity run ends at `agent_settled` and carries a positive,
+monotonically increasing `cycleId`. A `pi_continue` while the worker is running
+is queued into the **same** current cycle; only a `pi_continue` after settlement
+or a failed cycle starts a **new** cycle. `pi_status.cycleId` (>= 1) waits for
+that cycle's boundary but always returns the current snapshot, so read the
+matching entry from the bounded `cycles` history (or the current `result`).
+`pi_abort` cancels the running cycle and keeps the process continuable; a
+completed idle cycle is unchanged. `pi_release` terminates the process and
+frees the slot while preserving a completed result. Only a released worker or a
+dead process cannot be continued. The `result` is reset when a new cycle
+starts; up to `maxCycles` (default 10) previous cycles are archived, and result
+text is capped at `maxResultChars` (default 256000) characters with a
+`truncated` flag and original `chars` count.
 
 ## Runtime environment
 
@@ -126,6 +149,9 @@ supervising agent must inspect results before acceptance.
 | `PI_WORKER_RPC_TIMEOUT_MS` | `15000` | Per-RPC timeout. |
 | `PI_WORKER_IDLE_TIMEOUT_MS` | `600000` | Idle deadline; `0` disables it. |
 | `PI_WORKER_TASK_TIMEOUT_MS` | `3600000` | Activity-cycle deadline. |
+| `PI_WORKER_MAX_RESULT_CHARS` | `256000` | Maximum authoritative `result` text; longer results set `truncated` and keep the original `chars`. |
+| `PI_WORKER_MAX_CYCLES` | `10` | Maximum previous cycles retained per worker snapshot. |
+| `PI_WORKER_MAX_ARCHIVED` | `25` | Maximum released worker snapshots retained in `pi_list`. |
 | `PI_WORKER_ALLOWED_ROOTS` | Host Roots, else server cwd | Explicit allowed-roots override. |
 
 Host config locations can be overridden with `CODEX_HOME`, `XDG_CONFIG_HOME`,
@@ -138,16 +164,37 @@ authentication configuration; no secret environment variable is needed here.
 - Skill installation is not transactional; no rollback is provided.
 - Saving a configuration does not establish a live host connection; verify
   `pi_list` in the host. `doctor --probe` checks only the package runtime.
-- Profiles and modes are not an operating-system security sandbox.
-- `worktree` starts from Git `HEAD`; uncommitted and untracked changes are not
-  included, and the worktree is not merged or deleted automatically.
-- There is no `allowedWriteScope` parameter; the file boundary is textual in
-  the task and must be verified after the worker runs.
+- Profiles are not an operating-system security sandbox. There is no
+  `allowedWriteScope` parameter; the file boundary is textual in the task and
+  must be verified after the worker runs.
 - Workers are in-memory and are not durable across an MCP restart or host
-  reconnection.
+  reconnection. Release a completed worker with `pi_release`; `pi_abort`
+  cancels the current execution only.
 - Global install scope does not grant workers access to all projects.
 - `update` replaces the managed MCP entry and Skill files; previously set
   custom options must be supplied again.
+
+## Version compatibility (v0.3.0)
+
+v0.3.0 is an intentional breaking interface simplification:
+
+- The `pi_spawn` `mode` parameter is removed. Pass the desired absolute `cwd`
+  directly; the MCP never creates a worktree or branch. It does not delete any
+  existing worktree.
+- `pi_spawn` gains an optional `thinking` level, and `profile` now defaults to
+  `inspect`. Pass `implement` explicitly for writes or shell commands.
+- `pi_status` gains optional `waitMs` (bounded wait) and `cycleId`; `pi_abort`
+  cancels the running cycle only (keeping the process continuable, and a
+  no-op that preserves a completed idle result); `pi_release` terminates the
+  process and frees the slot, preserving a completed result.
+- Task outcome is reported as a cycle `result` separate from diagnostics, reset
+  when a new cycle starts and archived in a bounded `cycles` history.
+
+Old callers must drop `mode` and update their Skill copy; previously installed
+Skill files are replaced by `update`. Old `workerId` values are in-memory only
+and cannot be recovered across an MCP restart or instance, so start a new
+Worker. Existing Git worktrees or branches created by an older runtime are not
+automatically removed.
 
 See the delegation policy in
 [skills/pi-delegate/SKILL.md](../skills/pi-delegate/SKILL.md) and the license in

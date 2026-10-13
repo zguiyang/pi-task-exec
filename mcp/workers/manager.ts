@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { mkdir, realpath, stat } from "node:fs/promises";
 import { delimiter, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { PiRpcWorker } from "../rpc/pi-rpc.js";
-import type { WorkerConfig, WorkerMode, WorkerProfile, WorkerSnapshot } from "./types.js";
+import type { WorkerConfig, WorkerMode, WorkerProfile, WorkerSnapshot, WorkerThinkingLevel } from "./types.js";
 import { DEFAULT_WORKER_CONFIG } from "./types.js";
 
 function environmentNumber(name: string, fallback: number, minimum = 1, maximum = 2_147_000_000): number {
@@ -56,7 +56,8 @@ export class WorkerManager {
     return pending;
   }
 
-  async spawn(input: { task: string; cwd: string; mode: WorkerMode; profile: WorkerProfile; taskTimeoutMs?: number | undefined; model?: string | undefined }) {
+  async spawn(input: { task: string; cwd: string; mode: WorkerMode; profile?: WorkerProfile; taskTimeoutMs?: number | undefined; model?: string | undefined; thinking?: WorkerThinkingLevel | undefined }) {
+    const profile: WorkerProfile = input.profile ?? "inspect";
     if (this.shuttingDown) throw new Error("MCP server is shutting down and cannot start workers");
     const active = [...this.workers.values()].filter((worker) => worker.isLive()).length;
     if (active + this.spawning >= this.maxWorkers) {
@@ -78,8 +79,9 @@ export class WorkerManager {
         task: input.task,
         cwd: workerCwd,
         mode: input.mode,
-        profile: input.profile,
+        profile,
         ...(input.model !== undefined ? { requestedModel: input.model } : {}),
+        ...(input.thinking !== undefined ? { requestedThinking: input.thinking } : {}),
         sessionMode: "no-session",
         status: "starting",
         state: "starting",
@@ -94,7 +96,7 @@ export class WorkerManager {
         lastOutput: "",
       };
       const args = ["--mode", "rpc", "--no-session"];
-      args.push("--tools", input.profile === "inspect" ? "read,grep,find,ls" : "read,edit,write,bash,grep,find,ls");
+      args.push("--tools", profile === "inspect" ? "read,grep,find,ls" : "read,edit,write,bash,grep,find,ls");
       const workerConfig = {
         ...this.config,
         taskTimeoutMs: input.taskTimeoutMs ?? this.config.taskTimeoutMs,
@@ -110,7 +112,7 @@ export class WorkerManager {
       reservationHeld = false;
       try {
         await worker.ready();
-        await worker.initializeModel(input.model);
+        await worker.initializeModel(input.model, input.thinking);
         await worker.prompt(input.task);
         return worker.refresh();
       } catch (error) {

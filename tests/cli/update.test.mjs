@@ -799,7 +799,7 @@ test("a missing or unverifiable release tag conflicts the complete update before
   assert.deepEqual(action, { kind: "exit", code: 1 });
   const [plan, execution] = jsonBlocks(captured.stdout());
   assert.equal(plan.conflicts[0].code, "release_tag_missing");
-  assert.match(plan.conflicts[0].message, /missing v0\.2\.2/);
+  assert.match(plan.conflicts[0].message, /missing v0\.3\.0/);
   assert.equal(execution.status, "conflict");
   assert.equal(calls.length, 0, "no Skills CLI spawn after a failed tag preflight");
   assert.equal(await readFile(configPath, "utf8"), beforeConfig);
@@ -858,7 +858,7 @@ test("the text preview shows current/target refs, managed key/path, scope impact
   assert.match(text, /target: @zguiyang\/pi-task-exec@latest/);
   assert.match(text, /Update .*config\.toml/);
   assert.match(text, /current: v0\.0\.9/);
-  assert.match(text, /target: v0\.2\.2/);
+  assert.match(text, /target: v0\.3\.0/);
   assert.match(text, /existing local changes may be lost/);
   assert.match(text, /Update MCP \+ Skill · Codex · project/);
 });
