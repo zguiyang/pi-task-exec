@@ -41,14 +41,16 @@ From the project you want to configure, run the unified setup:
 npx -y @zguiyang/pi-task-exec@latest setup
 ```
 
-> The v0.3.0 worker interface documented here (seven tools, `thinking`,
-> cycles, `pi_abort`/`pi_release`) becomes usable after v0.3.0 is published;
-> `@latest` currently resolves to v0.2.2, which uses the older `mode`
-> interface.
+> v0.3.0 is the current release. It changes the worker interface to seven
+> tools with a required `cwd`, `thinking`, activity cycles, and separate
+> `pi_abort`/`pi_release`. If you are upgrading from v0.2.2, follow the
+> [v0.3.0 migration notes](docs/usage.md#version-compatibility-v030).
 
 It prompts for host and scope, prints the planned MCP and Skill writes, and
-asks for confirmation. To specify the selections up front (confirmation still
-applies):
+asks for confirmation. The `pi-delegate` Skill is installed from this
+repository (`skills/pi-delegate`) at the matching `v0.3.0` release tag through
+the pinned Skills CLI `skills@1.7.1`. To specify the selections up front
+(confirmation still applies):
 
 ```sh
 npx -y @zguiyang/pi-task-exec@latest setup --host codex --scope project
@@ -72,6 +74,8 @@ configured custom settings must be supplied again. `doctor` is read-only;
 ## Learn more
 
 - Full usage reference: [docs/usage.md](docs/usage.md)
+- v0.3.0 release notes: [docs/release-v0.3.0.md](docs/release-v0.3.0.md)
+- v0.2.2 → v0.3.0 migration: [docs/usage.md](docs/usage.md#version-compatibility-v030)
 - Delegation policy: [skills/pi-delegate/SKILL.md](skills/pi-delegate/SKILL.md)
 - License: [LICENSE](LICENSE)
 

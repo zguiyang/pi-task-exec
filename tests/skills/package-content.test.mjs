@@ -100,9 +100,9 @@ test("pi-delegate documents bounded cycle results and the status cycleId contrac
   assert.match(contract, /positive `cycleId` \(>= 1\)/i);
 });
 
-test("pi-delegate does not link an unpublished v0.3.0 Git tag", async () => {
+test("pi-delegate documents the published v0.3.0 contract", async () => {
   const contract = await readFile(resolve(skillRoot, "references/mcp-contract.md"), "utf8");
   assert.doesNotMatch(contract, /tree\/v0\.3\.0/);
-  assert.match(contract, /v0\.3\.0 is not published yet/i);
-  assert.match(contract, /resolves to v0\.2\.2/i);
+  assert.match(contract, /v0\.3\.0 is the current published release/i);
+  assert.match(contract, /currently `v0\.3\.0`/i);
 });

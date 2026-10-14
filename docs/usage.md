@@ -50,10 +50,9 @@ command: npx
 args:    -y @zguiyang/pi-task-exec@latest mcp serve
 ```
 
-> **Publication status:** v0.3.0 is not published yet; `@latest` currently
-> resolves to v0.2.2, which uses the older `mode` interface. The v0.3.0
-> interface documented in this guide and in the Skill becomes usable only
-> after v0.3.0 is published.
+> v0.3.0 is the current published release, so `@latest` resolves to v0.3.0.
+> The worker interface documented in this guide and in the Skill matches that
+> release; upgrading from v0.2.2 requires the migration below.
 
 Add the equivalent entry to each host's config file. Restart the host and
 verify `pi_list` inside it after any change.
@@ -104,6 +103,21 @@ Mode ignores project MCP servers until the worktree is trusted. The installer
 does not grant that trust. From a source checkout, build first and pass
 `--local-dev` to write a local `node .../dist/cli/index.js mcp serve` entry;
 without it the plan reports `local_dev_required` and writes nothing.
+
+## Skill installation and version
+
+`setup` and `add skill` install the bundled `pi-delegate` Skill through the
+pinned Vercel Skills CLI `skills@1.7.1` (launched as
+`npx -y skills@1.7.1 ...`), with structured arguments and `shell: false`. The
+fixed source is `https://github.com/zguiyang/pi-task-exec` (normalized
+`zguiyang/pi-task-exec`), subpath `skills/pi-delegate`. A release install uses
+the exact `v<packageVersion>` tag (currently `v0.3.0`); a source checkout uses
+the pinned commit `f914707fa22fd658f50e059a5091440796ef39e0`. There is no
+fallback to `main` or `@latest`. The installer verifies the installed
+`SKILL.md` frontmatter and the lockfile source/ref before reporting success;
+the copy is not transactional and provides no rollback. The bundled Skill
+carries MCP-metadata `version: "5"` for the v0.3.0 contract. `remove skill` is
+not supported yet.
 
 ## Worker tools
 
@@ -176,7 +190,10 @@ authentication configuration; no secret environment variable is needed here.
 
 ## Version compatibility (v0.3.0)
 
-v0.3.0 is an intentional breaking interface simplification:
+v0.3.0 is the current release and an intentional breaking interface change
+from v0.2.2, which used the older `mode` interface and six tools. The MCP now
+exposes seven tools: `pi_spawn`, `pi_status`, `pi_steer`, `pi_continue`,
+`pi_abort`, `pi_release`, and `pi_list`.
 
 - The `pi_spawn` `mode` parameter is removed. Pass the desired absolute `cwd`
   directly; the MCP never creates a worktree or branch. It does not delete any
@@ -194,7 +211,8 @@ Old callers must drop `mode` and update their Skill copy; previously installed
 Skill files are replaced by `update`. Old `workerId` values are in-memory only
 and cannot be recovered across an MCP restart or instance, so start a new
 Worker. Existing Git worktrees or branches created by an older runtime are not
-automatically removed.
+automatically removed. See [release-v0.3.0.md](release-v0.3.0.md) for the full
+change list.
 
 See the delegation policy in
 [skills/pi-delegate/SKILL.md](../skills/pi-delegate/SKILL.md) and the license in

@@ -29,9 +29,13 @@ Pi TaskExec 通过 MCP 将明确的编码任务委派给本地 [Pi](https://pi.d
 npx -y @zguiyang/pi-task-exec@latest setup
 ```
 
-> 本文档描述的 v0.3.0 工作进程接口（七个工具、`thinking`、cycle、`pi_abort`/`pi_release`）需在 v0.3.0 发布后才会生效；当前 `@latest` 仍为 v0.2.2，使用旧的 `mode` 接口。
+> v0.3.0 是当前版本。它将工作进程接口改为七个工具，要求显式 `cwd`，并加入
+> `thinking`、活动周期以及分离的 `pi_abort`/`pi_release`。如果从 v0.2.2 升级，
+> 请先阅读 [v0.3.0 迁移说明](docs/usage.md#version-compatibility-v030)。
 
-命令会提示选择宿主与作用域，打印 MCP 与 Skill 的写入计划并请求确认。也可以
+命令会提示选择宿主与作用域，打印 MCP 与 Skill 的写入计划并请求确认。
+`pi-delegate` Skill 会从本仓库（`skills/pi-delegate`）按匹配的 `v0.3.0`
+发布标签，经固定版本 Skills CLI `skills@1.7.1` 安装。也可以
 预先指定选项（仍需确认）：
 
 ```sh
@@ -54,6 +58,8 @@ npx -y @zguiyang/pi-task-exec@latest doctor --probe
 ## 了解更多
 
 - 完整使用参考：[docs/usage.md](docs/usage.md)
+- v0.3.0 发布说明：[docs/release-v0.3.0.md](docs/release-v0.3.0.md)
+- v0.2.2 → v0.3.0 迁移：[docs/usage.md](docs/usage.md#version-compatibility-v030)
 - 委派策略：[skills/pi-delegate/SKILL.md](skills/pi-delegate/SKILL.md)
 - 许可证：[LICENSE](LICENSE)
 

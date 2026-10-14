@@ -4,11 +4,9 @@ This reference describes the target public interface of
 `@zguiyang/pi-task-exec` v0.3.0. It is deliberately a delegation aid, not a
 second implementation of the runtime.
 
-> **Publication status:** v0.3.0 is not published yet. `npx -y
-> @zguiyang/pi-task-exec@latest` currently resolves to v0.2.2, which uses the
-> older `mode` interface. The setup and launch guidance below becomes usable
-> only after v0.3.0 (or a later release carrying this contract) is published;
-> until then, keep using your installed version.
+> v0.3.0 is the current published release, so `@latest` resolves to v0.3.0 and
+> the setup and launch guidance below applies to it. If you are upgrading from
+> v0.2.2, refresh your installed Skill copy with `update`.
 
 ## Dependency and installation
 
@@ -31,7 +29,11 @@ runtime needs Node.js >=22.20.0 and a configured local `pi` executable. Git is
 not required by the runtime: the Supervisor chooses the working directory and
 the MCP never creates a worktree or branch. The Skill and MCP contract are
 maintained together in `zguiyang/pi-task-exec`; installing the Skill by itself
-does not configure the MCP.
+does not configure the MCP. The unified setup installs the Skill through the
+pinned Skills CLI `skills@1.7.1` from the fixed source
+`https://github.com/zguiyang/pi-task-exec` (`skills/pi-delegate`) at the
+`v${packageVersion}` tag (currently `v0.3.0`), keeping the Skill and MCP
+versions aligned.
 
 ## Delegation policy
 
