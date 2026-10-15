@@ -1,6 +1,6 @@
 # Pi TaskExec
 
-Pi TaskExec 通过 MCP 将明确的编码任务委派给本地 [Pi](https://pi.dev) 工作进程，让主智能体专注于规划、决策与评审，减少在不同智能体之间切换和手动复制上下文的麻烦。
+Pi TaskExec 让主智能体按需通过 MCP 将边界明确的调查、分析、实现或验证任务交给本地 [Pi](https://pi.dev) 工作进程。委派收益不足时，主智能体可以直接完成任务。
 
 这个项目源于作者自己的工作方式：使用不同的模型或订阅计划，分别承担规划评审和具体执行。如果你也有多个 AI 编码订阅或模型资源，可以尝试用这种分工更充分地利用它们，并减少执行细节对主智能体上下文的占用。
 
@@ -29,13 +29,13 @@ Pi TaskExec 通过 MCP 将明确的编码任务委派给本地 [Pi](https://pi.d
 npx -y @zguiyang/pi-task-exec@latest setup
 ```
 
-> v0.3.1 是当前版本，统一了 Skill 与 MCP 描述中的委派规则。v0.3.0 的
+> v0.3.1 是当前已发布版本；此工作区正在准备采用按需委派策略的 v0.3.2。v0.3.0 的
 > 工作进程接口变更仍然适用；如果从 v0.2.2 升级，请先阅读
 > [v0.3.0 迁移说明](docs/usage.md#version-compatibility-v030)。
 
 命令会提示选择宿主与作用域，打印 MCP 与 Skill 的写入计划并请求确认。
-`pi-delegate` Skill 会从本仓库（`skills/pi-delegate`）按匹配的 `v0.3.1`
-发布标签，经固定版本 Skills CLI `skills@1.7.1` 安装。也可以
+`pi-delegate` Skill 会从本仓库（`skills/pi-delegate`）按匹配的发布标签，
+经固定版本 Skills CLI `skills@1.7.1` 安装。也可以
 预先指定选项（仍需确认）：
 
 ```sh
@@ -58,6 +58,7 @@ npx -y @zguiyang/pi-task-exec@latest doctor --probe
 ## 了解更多
 
 - 完整使用参考：[docs/usage.md](docs/usage.md)
+- v0.3.2 发布准备：[docs/release-v0.3.2.md](docs/release-v0.3.2.md)
 - v0.3.1 发布说明：[docs/release-v0.3.1.md](docs/release-v0.3.1.md)
 - v0.2.2 → v0.3.0 迁移：[docs/usage.md](docs/usage.md#version-compatibility-v030)
 - 委派策略：[skills/pi-delegate/SKILL.md](skills/pi-delegate/SKILL.md)

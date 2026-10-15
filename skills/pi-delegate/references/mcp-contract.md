@@ -1,12 +1,13 @@
-# Pi TaskExec MCP contract (v0.3.1)
+# Pi TaskExec MCP contract (v0.3.2)
 
 This reference describes the target public interface of
-`@zguiyang/pi-task-exec` v0.3.1. It is deliberately a delegation aid, not a
-second implementation of the runtime.
+`@zguiyang/pi-task-exec` v0.3.2, prepared for the upcoming release. It is
+deliberately a delegation aid, not a second implementation of the runtime.
 
-> v0.3.1 is the current published release, so `@latest` resolves to v0.3.1 and
-> the setup and launch guidance below applies to it. If you are upgrading from
-> v0.2.2, refresh your installed Skill copy with `update`.
+> v0.3.1 remains the latest published release, so `@latest` still resolves to
+> v0.3.1 and the setup and launch guidance below applies to it until v0.3.2
+> is published; refresh your installed Skill copy with `update` after the
+> release. If you are upgrading from v0.2.2, do the same.
 
 ## Dependency and installation
 
@@ -32,33 +33,19 @@ maintained together in `zguiyang/pi-task-exec`; installing the Skill by itself
 does not configure the MCP. The unified setup installs the Skill through the
 pinned Skills CLI `skills@1.7.1` from the fixed source
 `https://github.com/zguiyang/pi-task-exec` (`skills/pi-delegate`) at the
-`v${packageVersion}` tag (currently `v0.3.1`), keeping the Skill and MCP
-versions aligned.
+`v${packageVersion}` tag (currently `v0.3.1`; `v0.3.2` is pending
+publication), keeping the Skill and MCP versions aligned.
 
 ## Delegation policy
 
-Delegate a concrete, bounded execution task by default once its objective,
-context, operating boundary, completion check, and side effects are
-understood. This includes small one-file edits, read-only inspection, one
-targeted test, small bug fixes, and mechanical changes as well as larger
-implementation work. Task size is not an eligibility rule.
-
-The Supervisor keeps requirement interpretation, product and architecture
-decisions, task decomposition, dependency and concurrency planning, risk and
-permission decisions, integration, review, and final acceptance. For a complex
-goal, split work into coherent, independently verifiable atomic tasks before
-calling `pi_spawn`; then choose serial or non-overlapping parallel dispatch.
-Use `pi_continue` for related follow-up after review, rather than repeatedly
-creating unrelated replacement workers.
-
-Do not create a Worker for every microscopic operation when delegation supplies
-no useful execution boundary. The Supervisor may directly coordinate, inspect
-the workspace baseline, verify results, and perform an extremely low-cost
-action where delegation plainly adds no useful boundary. Atomicity does not
-authorize destructive data work, secrets or sensitive configuration handling,
-production operations, irreversible changes, Git-history rewriting, or work
-outside user authorization; retain those decisions and obtain any needed
-approval first.
+Pi is optional for bounded independent investigation, analysis,
+implementation, and verification. Work directly when delegation adds more
+overhead than value. A task needs a goal, scope, expected result, and stopping
+condition; it may still require deep thought. The Worker chooses steps within
+that boundary. The Supervisor retains authorization, global decisions,
+integration, and final acceptance. Match verification to risk, and use
+`pi_continue` for a related live Worker. See the [Skill](../SKILL.md) for the
+full decision policy.
 
 ## Tools and exact inputs
 
@@ -86,7 +73,8 @@ transport, or Skill-managed worker registry.
 ## Directory, profile, and safety
 
 The supplied `cwd` must be an existing absolute directory inside the allowed
-roots. The MCP resolves its real path and checks containment; it does not
+roots, and it stays fixed for the Worker's lifetime: `pi_continue` preserves
+the original `cwd`, profile, and permissions. The MCP resolves its real path and checks containment; it does not
 create, clone, or remove directories, worktrees, or branches, and it never
 changes the directory you passed. Explicit `PI_WORKER_ALLOWED_ROOTS` takes
 precedence, including an empty value that denies all directories. Otherwise,
@@ -205,12 +193,13 @@ task blindly, and do not use new Workers to work around the failure.
 
 The Supervisor independently checks source evidence for investigations and the
 real diff, scope, validation results, side effects, and request satisfaction
-for implementations. A Worker's textual report, accepted call, clean exit, or
+for implementations, with verification depth matched to the risk of the
+change. A Worker's textual report, accepted call, clean exit, or
 `settled` status is not final acceptance.
 
 ## Invocation examples
 
-Small, bounded execution work is eligible for delegation:
+Bounded, independent execution work is eligible for delegation:
 
 ```text
 pi_spawn({ task: "Read src/config.ts and report whether the timeout is parsed as milliseconds, citing the relevant lines.", cwd: "/project", profile: "inspect" })

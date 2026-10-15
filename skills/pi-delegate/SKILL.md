@@ -1,17 +1,18 @@
 ---
 name: pi-delegate
 description: >-
-  MCP delegation policy for bounded atomic execution tasks: once a Supervisor
-  can state a task's objective, relevant context, operating boundary,
-  completion check, and expected side effects, delegate it to a Pi worker by
-  default — investigation, implementation, testing, or mechanical work,
-  regardless of task size. Keep requirements, architecture, risk decisions,
-  coordination, integration, and final acceptance with the Supervisor.
+  MCP delegation policy: Pi is an optional route for bounded, independent
+  investigation, analysis, implementation, and verification once the
+  Supervisor can state the goal, boundary, and stopping condition; direct
+  execution fits simple or context-coupled work. Atomic means a clear
+  goal/boundary/stopping condition, not shallow thought. Keep requirements,
+  architecture, risk decisions, coordination, integration, and final
+  acceptance with the Supervisor.
 license: MIT
 metadata:
   short-description: Delegate bounded work through the registered pi-task-exec MCP.
-  version: "5"
-  updated: "2026-10-13"
+  version: "6"
+  updated: "2026-10-15"
 ---
 
 # Pi Delegate
@@ -28,32 +29,39 @@ configuration, change Pi credentials or defaults, or fall back to the legacy
 Pi CLI runner. If the MCP tools are unavailable, report the missing dependency
 and give the installation route in [the reference](references/mcp-contract.md).
 
-## Atomic execution first
+## When to delegate: bounded and independent
 
-Use Pi by default for a concrete execution task once the Supervisor can state
-its objective, relevant context, operating boundary, completion check, and
-expected side effects. Task size is not the gate: a one-file edit, a read-only
-search, a single test run, a small bug fix, or a mechanical change can each be
-a valid atomic delegation. Atomic means one bounded outcome and accountable
-execution, not one file or one command.
+Pi is an optional tool, not the default. Delegate a task when it is bounded
+and independent: the Supervisor can state a clear goal, an operating
+boundary, and a stopping condition (what counts as done), and the work can
+proceed without live back-and-forth with the Supervisor. Eligible work
+includes independent investigation, analysis, implementation, verification,
+tests, and mechanical changes. Task size is not the gate: a one-file edit, a
+read-only search, a single test run, or a small bug fix can each qualify.
 
-The Supervisor first understands the user request and makes any product,
-architecture, risk, authorization, and dependency decisions. It then delegates
-the decided execution work: investigation, file reading/search, implementation,
-bug fixing, tests, builds, validation, and mechanical changes. Do not delegate
-an ambiguous request, an unresolved design choice, or final acceptance.
+Execute directly when the work is simple or context-coupled: quick edits that
+depend on the current conversation, routine workspace-state checks,
+coordination, and other work where spawning a Worker adds no useful
+execution boundary. Requirement interpretation, product and architecture
+judgment, authorization, integration, and final acceptance stay with the
+Supervisor regardless of route. Do not delegate an ambiguous request or an
+unresolved design choice.
 
-The Supervisor may directly perform coordination, workspace-state checks,
-result verification, and an extremely low-cost action where delegation is
-plainly less efficient. This is a narrow efficiency exception, not a rule that
-uses task size to keep execution local. Do not create a Worker for every
-microscopic operation when it adds no useful execution boundary.
+Atomic means a clear goal, boundary, and stopping condition — not shallow
+thought. A delegated task may require deep analysis; its depth and its size
+do not make it unsuitable for delegation.
+
+## Local autonomy without global scope expansion
+
+Within its stated boundary a Worker has local autonomy: it decides how to
+read, edit, and validate in order to reach the bounded goal. It must not
+expand scope globally — no widening the goal, no touching areas outside the
+boundary, no product, architecture, authorization, or integration decisions,
+and no commit, push, merge, reset, stash, or clean — unless the Supervisor
+explicitly authorizes that exact action.
 
 Before an implementation worker, record the workspace state and give it the
-objective, allowed scope, constraints, expected result, and validation. A
-Worker must not make product, architecture, authorization, or integration
-decisions, broaden scope, commit, push, merge, reset, stash, or clean unless
-the Supervisor explicitly authorizes that exact action.
+objective, allowed scope, constraints, expected result, and validation.
 
 ## Complex work: split, dispatch, review
 
@@ -62,8 +70,9 @@ overall objective, maps dependencies, splits it into independently verifiable
 atomic tasks, and selects serial or parallel execution. Dispatch independent
 tasks separately; parallel work must not overlap writes. Review each result,
 then steer a running Worker or use `pi_continue` for a related follow-up that
-benefits from its context. Integrate only after the Supervisor's review and
-final acceptance.
+benefits from its context; prefer continuing the related live session over
+spawning a replacement Worker. Integrate only after the Supervisor's review
+and final acceptance.
 
 Atomic tasks can span multiple files or commands when that is the smallest
 coherent responsibility boundary. Do not fragment work merely to increase
@@ -79,15 +88,18 @@ worktree, branch, or directory, never rewrites Git history, and never changes
 the working directory you supplied.
 
 `profile` defaults to `inspect` and may be `inspect` or `implement`.
-`inspect` exposes only `read`, `grep`, `find`, and `ls`; it is for investigation
-and cannot run `bash`, so it cannot run tests, builds, lint, or any other shell
-command even when the intended command is logically read-only. Pass
+`inspect` exposes only `read`, `grep`, `find`, and `ls`; it is for investigation,
+analysis, and review and cannot run `bash`, so it cannot run tests, builds,
+lint, or any other shell command even when the intended command is logically
+read-only. Pass
 `implement` explicitly for any code change or shell-based verification; its
 tools include `read`, `edit`, `write`, `bash`, `grep`, `find`, and `ls`. Account
 for command-generated files and other side effects before using it.
 
 Use `pi_continue` only for a related task that stays within the existing
-Worker's profile. An `inspect` Worker can continue a read-only investigation,
+Worker's profile and preserves its current `cwd`, profile, and permissions:
+continuation keeps the original directory and tool set unchanged. An
+`inspect` Worker can continue a read-only investigation,
 but cannot continue into a code change or shell-based verification: create a
 new `implement` Worker instead. Continuation is not a permission upgrade.
 
@@ -127,8 +139,10 @@ silently ignored. Choose a level deliberately; do not set one by habit.
    Worker is running, the follow-up is queued into the current activity cycle
    (the same `cycleId`, ending at `agent_settled`); only when the Worker is
    already settled or cycle-failed does `pi_continue` start a new activity
-   cycle. Never read an old cycle's result as the current one. Use a new Worker
-   for unrelated work.
+   cycle. Never read an old cycle's result as the current one. Prefer this
+   related live session over a new Worker so its context is kept. Use a new
+   Worker for unrelated work, or when the old Worker is released, dead, or
+   has the wrong profile.
 5. Use `pi_abort` to cancel the current running cycle. It keeps the process
    operable, and a Worker with no running cycle is unchanged (its completed
    result is preserved), so you can `pi_continue` afterwards. Use
@@ -138,8 +152,9 @@ silently ignored. Choose a level deliberately; do not set one by habit.
 6. Call `pi_list` only to inspect the fleet or capacity. Do not build a
    mechanical list/status/list loop around routine work.
 
-Read [the MCP contract](references/mcp-contract.md) for exact v0.3.1
-parameters, state semantics, results, failures, and examples.
+Read [the MCP contract](references/mcp-contract.md) for exact v0.3.2
+parameters (target interface; v0.3.1 remains the latest published release),
+state semantics, results, failures, and examples.
 
 ## Parallelism and writes
 
@@ -194,8 +209,11 @@ Report unavailable models, unsupported thinking levels, permissions, sandbox
 rejection, authentication failure, timeout, stall, crash, or scope conflict to
 the Supervisor for a decision.
 
-Pi output is evidence, not acceptance. For an investigation, verify key source
-evidence before using its conclusions. For edits, independently inspect the
-diff and scope, run or verify relevant checks, assess side effects, and confirm
-the original request is met. Only the Supervisor may declare the overall task
-complete.
+Pi output is evidence, not acceptance, and verification is matched to the
+risk of the outcome; do not require a full development lifecycle for every
+task. For a read-only investigation, spot-check key source evidence before
+using its conclusions. For a low-risk edit, inspect the diff and scope, run
+relevant targeted checks, and confirm the original request is met. For risky
+or hard-to-reverse work, run or independently verify the relevant checks,
+assess side effects and pre-existing user changes, and obtain any required user
+authorization. Only the Supervisor may declare the overall task complete.

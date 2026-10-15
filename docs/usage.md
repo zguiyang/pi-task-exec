@@ -50,9 +50,10 @@ command: npx
 args:    -y @zguiyang/pi-task-exec@latest mcp serve
 ```
 
-> v0.3.1 is the current published release, so `@latest` resolves to v0.3.1.
-> The worker interface documented in this guide and in the Skill matches that
-> release; upgrading from v0.2.2 requires the migration below.
+> v0.3.1 is the current verified published release. This checkout prepares v0.3.2;
+> `@latest` will continue to resolve to the published version until release.
+> The worker API documented here is unchanged from that release; upgrading
+> from v0.2.2 requires the migration below.
 
 Add the equivalent entry to each host's config file. Restart the host and
 verify `pi_list` inside it after any change.
@@ -111,13 +112,35 @@ pinned Vercel Skills CLI `skills@1.7.1` (launched as
 `npx -y skills@1.7.1 ...`), with structured arguments and `shell: false`. The
 fixed source is `https://github.com/zguiyang/pi-task-exec` (normalized
 `zguiyang/pi-task-exec`), subpath `skills/pi-delegate`. A release install uses
-the exact `v<packageVersion>` tag (currently `v0.3.1`); a source checkout uses
+the exact `v<packageVersion>` tag for a published package; a source checkout uses
 the pinned commit `f914707fa22fd658f50e059a5091440796ef39e0`. There is no
 fallback to `main` or `@latest`. The installer verifies the installed
 `SKILL.md` frontmatter and the lockfile source/ref before reporting success;
 the copy is not transactional and provides no rollback. The bundled Skill
-carries MCP-metadata `version: "5"` for the v0.3.x contract. `remove skill` is
+carries MCP-metadata `version: "6"` for the updated delegation policy. `remove skill` is
 not supported yet.
+
+## Choosing whether to delegate
+
+Use Pi when a bounded task benefits from independent context, investigation,
+review, or a separate model. Give it one goal, the relevant context and scope,
+an expected result, and a stopping condition. The worker may reason and choose
+steps within that scope. The supervisor decides any broader change and reviews
+the result. Match verification to risk; a task does not require every stage of
+a development lifecycle.
+
+| Situation | Practical choice |
+| --- | --- |
+| A simple UI defect is already located | Fix it directly and run a focused check. |
+| A module fails for an unknown reason | Delegate an `inspect` investigation; request code evidence and a conclusion. |
+| Two technical approaches need comparison | Delegate read-only analysis; request tradeoffs and risks without edits. |
+| A backend endpoint has a settled contract | Delegate `implement` in an authorized cwd; request the endpoint and relevant checks only. |
+| Related work was interrupted and its worker is still live | Use `pi_continue` with that worker ID and avoid repeating settled investigation. |
+
+`inspect` cannot run shell commands. For shell-based checks, authorize
+`implement` and account for possible writes. A worker does not create or manage
+worktrees. Stop once the requested result is reached; record unrelated findings
+for a separate decision.
 
 ## Worker tools
 
@@ -191,7 +214,7 @@ authentication configuration; no secret environment variable is needed here.
 ## Version compatibility (v0.3.0)
 
 v0.3.0 introduced an intentional breaking interface change from v0.2.2,
-which used the older `mode` interface and six tools. It remains in v0.3.1.
+which used the older `mode` interface and six tools. It remains in v0.3.2.
 The MCP now exposes seven tools: `pi_spawn`, `pi_status`, `pi_steer`, `pi_continue`,
 `pi_abort`, `pi_release`, and `pi_list`.
 

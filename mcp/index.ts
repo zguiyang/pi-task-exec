@@ -10,7 +10,7 @@ export async function serveMcp(): Promise<void> {
     { name: MCP_SERVER_NAME, version: MCP_SERVER_VERSION },
     {
       instructions:
-        "Pi workers are subordinate coding workers. The supervisor owns planning, architecture, delegation and integration decisions, and final review. Delegate a bounded execution task by default once its objective, context, boundary, completion check, and side effects are clear; task size is not a gate. The supervisor keeps coordination, workspace-state checks, result verification, and an extremely low-cost action where delegation adds no useful boundary. Use multiple workers only for independent tasks, never recursively delegate, and review worker output before accepting it.",
+        "Pi workers can independently investigate, analyze, implement, or verify bounded tasks. Delegate when an isolated context offers a useful efficiency or quality benefit; complete simple or context-dependent work directly when that is more efficient. The supervisor owns scope, authorization, global decisions, integration, and final acceptance. Use inspect for read-only work and implement only for authorized writes or shell verification. Reuse a live worker for related follow-ups, never recursively delegate, and review its result before accepting it.",
     },
   );
   registerTools(server, manager);

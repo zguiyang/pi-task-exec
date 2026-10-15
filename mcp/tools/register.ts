@@ -25,7 +25,7 @@ function fail(error: unknown) {
 server.registerTool(
   "pi_spawn",
   {
-    description: "Delegate one bounded investigation, implementation, test, or mechanical coding task by default once its objective, context, operating boundary, completion check, and expected side effects are clear; task size is not a gate, so a one-file edit or read-only search is eligible. Keep requirement interpretation, architecture, risk, authorization, and final-acceptance decisions yourself, along with coordination, workspace-state checks, and an extremely low-cost action where delegation adds no useful boundary. Spawn multiple workers only for independent tasks with non-overlapping scope. A failed implement worker may leave partial edits; you remain responsible for integration and final review. Success means accepted, not completed.",
+    description: "Start one bounded independent investigation, analysis, implementation, or verification task when delegation offers a useful benefit. Give a clear goal, context, scope, expected result, and stopping condition. Simple or context-dependent work can be done directly. Use inspect for read-only work; implement permits writes and shell commands only within authorized scope. The supervisor retains global decisions and final review. A failed implement worker may leave partial edits. Success means accepted, not completed.",
     inputSchema: {
       task: z.string().min(1).max(20_000).describe("One bounded task with a clear scope and expected result."),
       cwd: z.string().min(1).describe("Absolute working directory inside PI_WORKER_ALLOWED_ROOTS. The worker runs in exactly this directory."),

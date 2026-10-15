@@ -18,7 +18,7 @@
 | R7 | 删除旧 CLI 时遗漏旧 bin/命令/文档引用 | 新包仍暴露旧名称或文档误导 | 高；旧字符串分散在 CLI、Host adapter、README、Skill、tests、dist | 构建前后对源码/文档/打包内容做旧名称 allowlist 扫描；只允许有明确历史语境的文档引用 | 发布前整组修正；发布后只能发新版本 |
 | R8 | 旧包名或旧 Registry ID 残留到新 package/server metadata | Registry 验证失败或用户安装旧包 | 高；当前全部配置还是旧名 | 一致性脚本校验 package `name`、`mcpName`、server `name`、identifier、仓库链接 | 不发布；修复后重跑 schema 与 tarball 验收 |
 | R9 | `task_*` 改名后 Skill/reference 与 MCP schema 不一致 | Agent 调用失败或错误理解工具能力 | 中高；现有 Skill 精确绑定 `pi_*`/v0.1.0 | 工具契约测试与 Skill 静态契约共用 manifest/schema；禁止保留旧 alias | 回退尚未发布的整组更改；发布后新版本同步修复 |
-| R10 | 工具描述与 Delegation-First Skill 冲突 | 主 Agent 的委派选择不一致 | **v0.3.1 候选已修正并通过包内验收**：MCP 初始化说明、`pi_spawn` 描述、Skill 与参考契约均表达“边界清楚后默认委派，任务大小不是门槛”，保留极低成本例外；尚待发布和实际宿主观察 | MCP discovery 测试检查统一策略与旧额外门槛；发布包检查实际工具描述和 Skill | 若宿主中仍见冲突，停止后续推广并修正；不靠 Skill 单方面覆盖 MCP 指引 |
+| R10 | 工具描述与委派 Skill 冲突 | 主 Agent 的委派选择不一致 | **v0.3.2 准备中**：MCP 初始化说明、`pi_spawn` 描述、Skill 与参考契约已统一为按需委派；v0.3.1 已发布，仍使用旧策略 | MCP discovery 测试检查工具列表、参数、权限和按需委派指导；发布包检查实际描述和 Skill | 发布前复核宿主中安装的 Skill 与 MCP 版本；若仍见冲突，修正后再推广 |
 | R11 | npm tarball 未携带完整 Skill | 用户安装 MCP 后找不到 `pi-delegate` | 高；过渡期 `files` 曾以 `mcp/dist/**` 与 `mcp/README.md` 为主 | 选型 A 下根 package `files` 必须包含根 `dist/**`、薄 `bin/`、`skills/pi-delegate/**`、必要根文档、LICENSE 和 `server.json`；tarball 测试断言 `SKILL.md` 和 references 存在 | 发布前修复 `files`；已发布包另发新版本 |
 | R12 | Skill 安装器覆盖用户已有同名 Skill | 用户数据丢失 | 中高；已有同名目录可能由用户自行维护 | 相同内容幂等；不同内容默认拒绝；显式备份后替换；原子暂存；记录 manifest | 从备份恢复；检测到用户修改时停止，不覆盖 |
 | R13 | MCP 配置安装器覆盖用户同名 Host 条目或丢失注释/其它配置 | Host 配置损坏或第三方配置丢失 | 高；当前旧 JSON/TOML 更新方式尚未覆盖跨平台冲突策略 | 解析后只编辑自有 key；同名不同内容默认停止；JSONC/TOML 保真；先备份；隔离 home 测试 | 原子恢复备份；若配置冲突不自动写 |
