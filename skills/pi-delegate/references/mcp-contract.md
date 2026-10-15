@@ -1,10 +1,10 @@
-# Pi TaskExec MCP contract (v0.3.0)
+# Pi TaskExec MCP contract (v0.3.1)
 
 This reference describes the target public interface of
-`@zguiyang/pi-task-exec` v0.3.0. It is deliberately a delegation aid, not a
+`@zguiyang/pi-task-exec` v0.3.1. It is deliberately a delegation aid, not a
 second implementation of the runtime.
 
-> v0.3.0 is the current published release, so `@latest` resolves to v0.3.0 and
+> v0.3.1 is the current published release, so `@latest` resolves to v0.3.1 and
 > the setup and launch guidance below applies to it. If you are upgrading from
 > v0.2.2, refresh your installed Skill copy with `update`.
 
@@ -32,16 +32,16 @@ maintained together in `zguiyang/pi-task-exec`; installing the Skill by itself
 does not configure the MCP. The unified setup installs the Skill through the
 pinned Skills CLI `skills@1.7.1` from the fixed source
 `https://github.com/zguiyang/pi-task-exec` (`skills/pi-delegate`) at the
-`v${packageVersion}` tag (currently `v0.3.0`), keeping the Skill and MCP
+`v${packageVersion}` tag (currently `v0.3.1`), keeping the Skill and MCP
 versions aligned.
 
 ## Delegation policy
 
-Delegate a concrete, bounded execution task when its objective, context,
-operating boundary, completion check, and side effects are understood. This
-includes small one-file edits, read-only inspection, one targeted test, small
-bug fixes, and mechanical changes as well as larger implementation work. Task
-size is not an eligibility rule.
+Delegate a concrete, bounded execution task by default once its objective,
+context, operating boundary, completion check, and side effects are
+understood. This includes small one-file edits, read-only inspection, one
+targeted test, small bug fixes, and mechanical changes as well as larger
+implementation work. Task size is not an eligibility rule.
 
 The Supervisor keeps requirement interpretation, product and architecture
 decisions, task decomposition, dependency and concurrency planning, risk and
@@ -53,10 +53,12 @@ creating unrelated replacement workers.
 
 Do not create a Worker for every microscopic operation when delegation supplies
 no useful execution boundary. The Supervisor may directly coordinate, inspect
-the workspace baseline, and verify results. Atomicity does not authorize
-destructive data work, secrets or sensitive configuration handling, production
-operations, irreversible changes, Git-history rewriting, or work outside user
-authorization; retain those decisions and obtain any needed approval first.
+the workspace baseline, verify results, and perform an extremely low-cost
+action where delegation plainly adds no useful boundary. Atomicity does not
+authorize destructive data work, secrets or sensitive configuration handling,
+production operations, irreversible changes, Git-history rewriting, or work
+outside user authorization; retain those decisions and obtain any needed
+approval first.
 
 ## Tools and exact inputs
 

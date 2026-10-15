@@ -1,11 +1,12 @@
 ---
 name: pi-delegate
 description: >-
-  MCP-native delegation policy for bounded atomic execution tasks: delegate
-  clear investigation, implementation, testing, and mechanical work to local
-  Pi workers regardless of task size. Keep requirements, architecture, risk
-  decisions, coordination, integration, and final acceptance with the
-  Supervisor.
+  MCP delegation policy for bounded atomic execution tasks: once a Supervisor
+  can state a task's objective, relevant context, operating boundary,
+  completion check, and expected side effects, delegate it to a Pi worker by
+  default — investigation, implementation, testing, or mechanical work,
+  regardless of task size. Keep requirements, architecture, risk decisions,
+  coordination, integration, and final acceptance with the Supervisor.
 license: MIT
 metadata:
   short-description: Delegate bounded work through the registered pi-task-exec MCP.
@@ -137,7 +138,7 @@ silently ignored. Choose a level deliberately; do not set one by habit.
 6. Call `pi_list` only to inspect the fleet or capacity. Do not build a
    mechanical list/status/list loop around routine work.
 
-Read [the MCP contract](references/mcp-contract.md) for exact v0.3.0
+Read [the MCP contract](references/mcp-contract.md) for exact v0.3.1
 parameters, state semantics, results, failures, and examples.
 
 ## Parallelism and writes
