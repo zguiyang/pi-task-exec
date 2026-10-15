@@ -50,8 +50,9 @@ command: npx
 args:    -y @zguiyang/pi-task-exec@latest mcp serve
 ```
 
-> v0.3.1 is the current verified published release. This checkout prepares v0.3.2;
-> `@latest` will continue to resolve to the published version until release.
+> v0.3.1 is the current published release. This checkout updates delegation
+> guidance without selecting the next release version; `@latest` still resolves
+> to the published version.
 > The worker API documented here is unchanged from that release; upgrading
 > from v0.2.2 requires the migration below.
 
@@ -214,7 +215,7 @@ authentication configuration; no secret environment variable is needed here.
 ## Version compatibility (v0.3.0)
 
 v0.3.0 introduced an intentional breaking interface change from v0.2.2,
-which used the older `mode` interface and six tools. It remains in v0.3.2.
+which used the older `mode` interface and six tools. It remains in this checkout.
 The MCP now exposes seven tools: `pi_spawn`, `pi_status`, `pi_steer`, `pi_continue`,
 `pi_abort`, `pi_release`, and `pi_list`.
 

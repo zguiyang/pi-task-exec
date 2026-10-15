@@ -16,12 +16,12 @@ test("pi-delegate source contains its entry Skill and MCP contract reference", a
   assert.ok(contract.trim().length > 1000);
 });
 
-test("pi-delegate v0.3.2 describes the target tools and has no mode/worktree workspace policy", async () => {
+test("pi-delegate describes the current tool interface and has no mode/worktree workspace policy", async () => {
   const skill = await readFile(resolve(skillRoot, "SKILL.md"), "utf8");
   const contract = await readFile(resolve(skillRoot, "references/mcp-contract.md"), "utf8");
 
-  assert.match(skill, /v0\.3\.2/);
-  assert.match(contract, /contract \(v0\.3\.2\)/);
+  assert.match(skill, /v0\.3\.1/);
+  assert.match(contract, /contract \(v0\.3\.1 interface\)/);
 
   // The old mode parameter and Git/worktree/HEAD workspace mandates must be gone from the Skill.
   assert.doesNotMatch(skill, /\bmode\b/i);
@@ -100,9 +100,9 @@ test("pi-delegate documents bounded cycle results and the status cycleId contrac
   assert.match(contract, /positive `cycleId` \(>= 1\)/i);
 });
 
-test("pi-delegate documents the prepared v0.3.2 contract", async () => {
+test("pi-delegate documents the unchanged published interface", async () => {
   const contract = await readFile(resolve(skillRoot, "references/mcp-contract.md"), "utf8");
   assert.doesNotMatch(contract, /tree\/v0\.3\.0/);
-  assert.match(contract, /v0\.3\.1 remains the latest published release/i);
+  assert.match(contract, /v0\.3\.1 is the current published release/i);
   assert.match(contract, /currently `v0\.3\.1`/i);
 });
