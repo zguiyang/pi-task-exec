@@ -29,7 +29,7 @@ Pi TaskExec 让主智能体按需通过 MCP 将边界明确的调查、分析、
 npx -y @zguiyang/pi-task-exec@latest setup
 ```
 
-> v0.3.1 是当前已发布版本；此工作区已更新按需委派策略，下一个版本将在计划功能完成后确定。v0.3.0 的
+> v0.3.1 是当前已发布版本；此工作区准备发布 v0.4.0，包含按需委派策略和多宿主 CLI 流程更新。v0.3.0 的
 > 工作进程接口变更仍然适用；如果从 v0.2.2 升级，请先阅读
 > [v0.3.0 迁移说明](docs/usage.md#version-compatibility-v030)。
 
@@ -72,6 +72,7 @@ npx -y @zguiyang/pi-task-exec@latest doctor --probe
 ## 了解更多
 
 - 完整使用参考：[docs/usage.md](docs/usage.md)
+- v0.4.0 发布说明：[docs/release-v0.4.0.md](docs/release-v0.4.0.md)
 - v0.3.1 发布说明：[docs/release-v0.3.1.md](docs/release-v0.3.1.md)
 - v0.2.2 → v0.3.0 迁移：[docs/usage.md](docs/usage.md#version-compatibility-v030)
 - 委派策略：[skills/pi-delegate/SKILL.md](skills/pi-delegate/SKILL.md)

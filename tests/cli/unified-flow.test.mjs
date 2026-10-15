@@ -113,7 +113,7 @@ test("uninstall deletes the shared Skill only when selected and names remaining 
   await mkdir(join(installed, "references"), { recursive: true });
   await writeFile(join(installed, "SKILL.md"), "---\nname: pi-delegate\n---\n");
   await writeFile(join(installed, "references", "mcp-contract.md"), "contract\n");
-  await writeFile(lock, `${JSON.stringify({ version: 1, skills: { "pi-delegate": { source: SKILL_EXPECTED_SOURCE, ref: "v0.3.1" }, other: { source: "other/repo" } } }, null, 2)}\n`);
+  await writeFile(lock, `${JSON.stringify({ version: 1, skills: { "pi-delegate": { source: SKILL_EXPECTED_SOURCE, ref: "v0.4.0" }, other: { source: "other/repo" } } }, null, 2)}\n`);
   const setup = await runCli(["setup", "--target", "mcp", "--host", "codex", "--host", "opencode", "--scope", "project", "--local-dev"], f.deps);
   assert.equal(setup.code, 0);
 

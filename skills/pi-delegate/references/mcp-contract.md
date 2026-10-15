@@ -1,12 +1,13 @@
-# Pi TaskExec MCP contract (v0.3.1 interface)
+# Pi TaskExec MCP contract (v0.4.0 package; unchanged interface)
 
 This reference describes the public interface of
-`@zguiyang/pi-task-exec` v0.3.1, which remains unchanged in this checkout.
+`@zguiyang/pi-task-exec` v0.4.0. The seven-tool MCP interface remains unchanged
+from v0.3.1 in this release candidate.
 It is a delegation aid, not a second implementation of the runtime.
 
-> v0.3.1 is the current published release. This checkout contains updated
-> delegation guidance, but the next release version has not been chosen.
-> Refresh your installed Skill copy with `update` after that release.
+> v0.3.1 is the current published release. This checkout prepares v0.4.0 with
+> updated delegation guidance and CLI flows. Refresh your installed Skill copy
+> with `update` after that release.
 
 ## Dependency and installation
 
@@ -32,7 +33,7 @@ maintained together in `zguiyang/pi-task-exec`; installing the Skill by itself
 does not configure the MCP. The unified setup installs the Skill through the
 pinned Skills CLI `skills@1.7.1` from the fixed source
 `https://github.com/zguiyang/pi-task-exec` (`skills/pi-delegate`) at the
-`v${packageVersion}` tag (currently `v0.3.1`), keeping the Skill and MCP
+`v${packageVersion}` tag (release candidate: `v0.4.0`), keeping the Skill and MCP
 versions aligned.
 
 ## Delegation policy

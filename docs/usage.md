@@ -60,9 +60,9 @@ command: npx
 args:    -y @zguiyang/pi-task-exec@latest mcp serve
 ```
 
-> v0.3.1 is the current published release. This checkout updates delegation
-> guidance without selecting the next release version; `@latest` still resolves
-> to the published version.
+> v0.3.1 is the current published release. This checkout prepares v0.4.0 with
+> updated delegation guidance and multi-host CLI flows; `@latest` still resolves
+> to v0.3.1 until the new package is published.
 > The worker API documented here is unchanged from that release; upgrading
 > from v0.2.2 requires the migration below.
 

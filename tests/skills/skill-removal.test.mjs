@@ -34,7 +34,7 @@ function ownedLock() {
     schema: "skills-lock.v1",
     updatedAt: "2025-01-02T03:04:05.000Z",
     skills: {
-      "pi-delegate": { source: "zguiyang/pi-task-exec", ref: "v0.3.1" },
+      "pi-delegate": { source: "zguiyang/pi-task-exec", ref: "v0.4.0" },
       "other-skill": { source: "someone/else", ref: "v9.9.9" },
     },
   };
@@ -120,7 +120,7 @@ test("an owned skill at project scope is removed with recoverable directory and 
   assert.match(plan.dirFingerprint, /^[0-9a-f]{64}$/);
   assert.ok(plan.checkedPaths.includes(installDir));
   assert.ok(plan.checkedPaths.includes(lockFile));
-  assert.equal(plan.metadata.ref, "v0.3.1");
+  assert.equal(plan.metadata.ref, "v0.4.0");
   assert.equal(plan.metadata.owner, "zguiyang/pi-task-exec");
 
   const result = await executeSkillRemoval(plan, { roots: [root], now: FIXED_NOW });
@@ -277,7 +277,7 @@ test("unrelated lock entries and top-level fields are preserved when removing pi
     version: 2,
     updatedAt: "2025-03-04T05:06:07.000Z",
     skills: {
-      "pi-delegate": { source: "zguiyang/pi-task-exec", ref: "v0.3.1", installedBy: "skills-cli" },
+      "pi-delegate": { source: "zguiyang/pi-task-exec", ref: "v0.4.0", installedBy: "skills-cli" },
       alpha: { source: "other/alpha", ref: "v1.0.0" },
       beta: { source: "other/beta", ref: "v2.0.0", extra: { nested: true } },
     },

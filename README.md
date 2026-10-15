@@ -41,8 +41,8 @@ From the project you want to configure, run the unified setup:
 npx -y @zguiyang/pi-task-exec@latest setup
 ```
 
-> v0.3.1 is the current published release. This checkout updates delegation
-> guidance; the next version will be chosen after the planned features are complete.
+> v0.3.1 is the current published release. This checkout prepares v0.4.0 with
+> updated delegation guidance and multi-host CLI flows.
 > The v0.3.0 worker-interface changes still apply;
 > if you are upgrading from v0.2.2, follow the
 > [v0.3.0 migration notes](docs/usage.md#version-compatibility-v030).
@@ -92,6 +92,7 @@ creates a worker.
 ## Learn more
 
 - Full usage reference: [docs/usage.md](docs/usage.md)
+- v0.4.0 release notes: [docs/release-v0.4.0.md](docs/release-v0.4.0.md)
 - v0.3.1 release notes: [docs/release-v0.3.1.md](docs/release-v0.3.1.md)
 - v0.2.2 → v0.3.0 migration: [docs/usage.md](docs/usage.md#version-compatibility-v030)
 - Delegation policy: [skills/pi-delegate/SKILL.md](skills/pi-delegate/SKILL.md)

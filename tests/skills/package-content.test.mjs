@@ -100,9 +100,9 @@ test("pi-delegate documents bounded cycle results and the status cycleId contrac
   assert.match(contract, /positive `cycleId` \(>= 1\)/i);
 });
 
-test("pi-delegate documents the unchanged published interface", async () => {
+test("pi-delegate documents the unchanged v0.4.0 candidate interface", async () => {
   const contract = await readFile(resolve(skillRoot, "references/mcp-contract.md"), "utf8");
   assert.doesNotMatch(contract, /tree\/v0\.3\.0/);
   assert.match(contract, /v0\.3\.1 is the current published release/i);
-  assert.match(contract, /currently `v0\.3\.1`/i);
+  assert.match(contract, /v0\.4\.0/);
 });

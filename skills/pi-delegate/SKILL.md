@@ -152,7 +152,7 @@ silently ignored. Choose a level deliberately; do not set one by habit.
 6. Call `pi_list` only to inspect the fleet or capacity. Do not build a
    mechanical list/status/list loop around routine work.
 
-Read [the MCP contract](references/mcp-contract.md) for the v0.3.1
+Read [the MCP contract](references/mcp-contract.md) for the v0.4.0
 parameters (unchanged in this checkout),
 state semantics, results, failures, and examples.
 
