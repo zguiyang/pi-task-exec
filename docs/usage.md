@@ -50,7 +50,7 @@ command: npx
 args:    -y @zguiyang/pi-task-exec@latest mcp serve
 ```
 
-> v0.3.0 is the current published release, so `@latest` resolves to v0.3.0.
+> v0.3.1 is the current published release, so `@latest` resolves to v0.3.1.
 > The worker interface documented in this guide and in the Skill matches that
 > release; upgrading from v0.2.2 requires the migration below.
 
@@ -111,12 +111,12 @@ pinned Vercel Skills CLI `skills@1.7.1` (launched as
 `npx -y skills@1.7.1 ...`), with structured arguments and `shell: false`. The
 fixed source is `https://github.com/zguiyang/pi-task-exec` (normalized
 `zguiyang/pi-task-exec`), subpath `skills/pi-delegate`. A release install uses
-the exact `v<packageVersion>` tag (currently `v0.3.0`); a source checkout uses
+the exact `v<packageVersion>` tag (currently `v0.3.1`); a source checkout uses
 the pinned commit `f914707fa22fd658f50e059a5091440796ef39e0`. There is no
 fallback to `main` or `@latest`. The installer verifies the installed
 `SKILL.md` frontmatter and the lockfile source/ref before reporting success;
 the copy is not transactional and provides no rollback. The bundled Skill
-carries MCP-metadata `version: "5"` for the v0.3.0 contract. `remove skill` is
+carries MCP-metadata `version: "5"` for the v0.3.x contract. `remove skill` is
 not supported yet.
 
 ## Worker tools
@@ -190,9 +190,9 @@ authentication configuration; no secret environment variable is needed here.
 
 ## Version compatibility (v0.3.0)
 
-v0.3.0 is the current release and an intentional breaking interface change
-from v0.2.2, which used the older `mode` interface and six tools. The MCP now
-exposes seven tools: `pi_spawn`, `pi_status`, `pi_steer`, `pi_continue`,
+v0.3.0 introduced an intentional breaking interface change from v0.2.2,
+which used the older `mode` interface and six tools. It remains in v0.3.1.
+The MCP now exposes seven tools: `pi_spawn`, `pi_status`, `pi_steer`, `pi_continue`,
 `pi_abort`, `pi_release`, and `pi_list`.
 
 - The `pi_spawn` `mode` parameter is removed. Pass the desired absolute `cwd`

@@ -94,11 +94,13 @@ test("MCP discovery exposes delegation guidance, tool choice semantics, and type
   try {
     const initialized = await initialize(server);
     assert.equal(initialized.serverInfo.name, "pi-task-exec");
-    assert.equal(initialized.serverInfo.version, "0.3.0");
+    assert.equal(initialized.serverInfo.version, "0.3.1");
     assert.match(initialized.instructions, /subordinate coding workers/i);
     assert.match(initialized.instructions, /planning.*architecture.*delegation.*integration.*final review/i);
     assert.match(initialized.instructions, /never recursively delegate/i);
     assert.match(initialized.instructions, /review worker output/i);
+    assert.match(initialized.instructions, /task size is not a gate/i);
+    assert.match(initialized.instructions, /extremely low-cost action/i);
 
     const result = await server.request("tools/list");
     assert.equal(result.error, undefined);
@@ -111,9 +113,14 @@ test("MCP discovery exposes delegation guidance, tool choice semantics, and type
     const runtimeGuidance = [initialized.instructions, ...tools.map((tool) => tool.description)].join("\n");
     assert.doesNotMatch(runtimeGuidance, /\b(codex|openai|claude|anthropic|cursor|zed|opencode)\b/i);
 
-    for (const phrase of ["bounded", "trivial", "architecture", "independent", "final review", "accepted, not completed"]) {
+    for (const phrase of ["bounded", "task size is not a gate", "completion check", "architecture", "independent", "final review", "accepted, not completed"]) {
       assert.ok(byName.pi_spawn.description.toLowerCase().includes(phrase), `pi_spawn description should mention ${phrase}`);
     }
+    assert.match(byName.pi_spawn.description, /by default once its objective, context, operating boundary, completion check, and expected side effects are clear/i);
+    assert.match(byName.pi_spawn.description, /extremely low-cost action/i);
+    // The old extra gate (saves supervisor context / enables parallel work) and the trivial-edit carve-out are gone.
+    assert.doesNotMatch(byName.pi_spawn.description, /saves supervisor context or enables useful parallel work/i);
+    assert.doesNotMatch(byName.pi_spawn.description, /Keep trivial edits/i);
     assert.match(byName.pi_status.description, /authoritative result/i);
     assert.match(byName.pi_status.description, /waitMs/i);
     assert.match(byName.pi_status.description, /does not cancel/i);
