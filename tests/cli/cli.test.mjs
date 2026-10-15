@@ -534,9 +534,10 @@ test("entrypoint with no arguments prints help and does not start MCP", async ()
 });
 
 test("entrypoint with an unknown command exits non-zero with a concise error and help hint", async () => {
-  const result = await runEntry(["uninstall"]);
+  // `uninstall` is a real command now, but it takes no subcommand.
+  const result = await runEntry(["uninstall", "skill"]);
   assert.equal(result.code, 1);
-  assert.match(result.stderr, /Unknown command: uninstall/);
+  assert.match(result.stderr, /Unknown command: uninstall skill/);
   assert.match(result.stderr, /^Error: Unknown command:/);
   assert.match(result.stderr, /pi-task-exec --help/);
   assert.doesNotMatch(result.stderr, /Commands:|Options:/);

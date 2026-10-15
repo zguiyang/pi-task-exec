@@ -9,7 +9,7 @@ import { highlight } from "../presentation.js";
 export const PLAN_SCHEMA = "pi-task-exec.plan.v1";
 export const MANAGED_BY = "pi-task-exec";
 
-export type PlanOperation = "add" | "remove" | "setup" | "update" | "doctor";
+export type PlanOperation = "add" | "remove" | "setup" | "update" | "uninstall" | "doctor";
 export type PlanTarget = "mcp" | "skill" | "both";
 export type Scope = "project" | "global";
 
@@ -333,8 +333,28 @@ export function planJson(plan: InstallPlan): string {
   return JSON.stringify(serializePlan(plan), null, 2);
 }
 
+/**
+ * Extend a planned Skills CLI argv with additional `--agent` values so one
+ * shared Skill install targets every selected host. The upstream
+ * `skills@1.7.1` `--agent <agents...>` option accepts multiple values, but the
+ * single-agent helper builds exactly one; this appends only the agent list.
+ * The pinned source, ref, skill name, scope flags, and every other argument
+ * are preserved byte-for-byte, and duplicate agent IDs are dropped.
+ */
+export function appendSkillCliAgents(args: readonly string[], agents: readonly string[]): string[] {
+  const extra = agents.filter((agent) => agent.length > 0);
+  if (extra.length === 0) return [...args];
+  const flagIndex = args.indexOf("--agent");
+  if (flagIndex === -1 || flagIndex + 1 >= args.length) return [...args];
+  let end = flagIndex + 1;
+  while (end < args.length && !args[end]!.startsWith("-")) end += 1;
+  const existing = args.slice(flagIndex + 1, end);
+  const merged = [...new Set([...existing, ...extra])];
+  return [...args.slice(0, flagIndex + 1), ...merged, ...args.slice(end)];
+}
+
 export function formatPlan(plan: InstallPlan, color = false): string {
-  const action = { add: "Add", setup: "Install", update: "Update", remove: "Remove", doctor: "Check" }[plan.operation];
+  const action = { add: "Add", setup: "Install", update: "Update", remove: "Remove", uninstall: "Uninstall", doctor: "Check" }[plan.operation];
   const component = plan.target === "both" ? "MCP + Skill" : plan.target === "mcp" ? "MCP" : "Skill";
   const host = plan.hostTarget?.displayName ?? plan.host;
   const lines = ["", highlight(`${action} ${component}${host ? ` · ${host}` : ""} · ${plan.scope ?? ""}`, "cyan", color)];
@@ -358,7 +378,7 @@ export function formatPlan(plan: InstallPlan, color = false): string {
   section("Requires approval", (plan.skillCli?.safety ?? []).map((item) => `${item.path} — ${item.message}`), "yellow");
   section("Unsupported", plan.unsupported.map((item) => item.message), "red");
   const routine = new Set(["already_configured", "already_up_to_date", "not_configured"]);
-  if (plan.operation === "remove") routine.add("project_trust_required");
+  if (plan.operation === "remove" || plan.operation === "uninstall") routine.add("project_trust_required");
   const safetyMessages = new Set((plan.skillCli?.safety ?? []).map((item) => item.message));
   const notes = plan.warnings.filter((item) => !routine.has(item.code) && !safetyMessages.has(item.message)).map((item) => {
     if (item.code === "local_checkout_launch") return "Uses this local checkout; keep it available.";
@@ -471,6 +491,7 @@ async function planMcp(plan: InstallPlan, request: PlanRequest, deps: PlanDepend
     return;
   }
   const adapter = deps.adapters.find((candidate) => candidate.id === host);
+  const removalOperation = request.operation === "remove" || request.operation === "uninstall";
   if (!adapter) {
     plan.unsupported.push({
       code: "unknown_host",
@@ -482,7 +503,7 @@ async function planMcp(plan: InstallPlan, request: PlanRequest, deps: PlanDepend
     return;
   }
 
-  const target = adapter.describe(deps.context, scope, request.operation === "remove" ? "remove" : "add");
+  const target = adapter.describe(deps.context, scope, removalOperation ? "remove" : "add");
   plan.hostTarget = target;
   plan.resolvedPaths.config = target.path;
   if (target.support) {
@@ -491,7 +512,7 @@ async function planMcp(plan: InstallPlan, request: PlanRequest, deps: PlanDepend
   }
 
   const configPath = target.path;
-  if (request.operation !== "remove" && request.operation !== "update" && deps.launchMode === "checkout") {
+  if (!removalOperation && request.operation !== "update" && deps.launchMode === "checkout") {
     if (!deps.localDev) {
       plan.conflicts.push({
         code: "local_dev_required",
@@ -514,7 +535,7 @@ async function planMcp(plan: InstallPlan, request: PlanRequest, deps: PlanDepend
     return;
   }
 
-  if (request.operation === "remove") {
+  if (removalOperation) {
     const result = adapter.planRemoval(input);
     if (result.kind === "unsupported") {
       plan.unsupported.push(result.capability);

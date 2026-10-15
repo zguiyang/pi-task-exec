@@ -874,22 +874,24 @@ test("global skill preview describes the shared .agents/skills scope", async () 
   assert.match(captured.stdout(), /\.agents[\/\\]skills/);
 });
 
-test("refusing the plan confirmation leaves MCP and skill untouched", async () => {
+test("the streamlined update runs with no routine confirmation and updates MCP and skill", async () => {
   const root = await makeRoot();
   const pkg = await makePackageRoot(root);
   const configPath = await seedCodex(root, "0.0.9");
   const target = await seedSkill(root, { scope: "project", ref: "v0.0.9" });
-  const beforeConfig = await readFile(configPath, "utf8");
-  const beforeSkill = await readFile(join(target.installDir, "SKILL.md"), "utf8");
   const { spawn, calls } = makeSkillSpawn({ ...target, scope: "project", ref: targetRef });
+  // A scripted No must never be consumed: there is no plan confirmation anymore.
   const interaction = scriptedInteraction({ confirms: [false] });
   const { deps, captured } = makeDeps(root, { packageRoot: pkg, skillSpawn: spawn, interaction });
   const action = await runCli(["update", "--host", "codex", "--scope", "project"], deps);
   assert.deepEqual(action, { kind: "exit", code: 0 });
-  assert.match(captured.stdout(), /Cancelled(?:\.|:) (?:No files changed|no changes were made)\./);
-  assert.equal(calls.length, 0);
-  assert.equal(await readFile(configPath, "utf8"), beforeConfig);
-  assert.equal(await readFile(join(target.installDir, "SKILL.md"), "utf8"), beforeSkill);
+  assert.deepEqual(interaction.calls, [], "the streamlined update never asks for a routine Proceed confirmation");
+  assert.doesNotMatch(captured.stdout(), /Cancelled|Proceed with this plan|Replace the listed path/);
+  assert.match(captured.stdout(), /codex: MCP updated/);
+  assert.match(captured.stdout(), /Skill: updated/);
+  assert.equal(calls.length, 1, "the Skills CLI runs without a plan prompt");
+  assert.match(await readFile(configPath, "utf8"), /@latest/, "the MCP entry is updated immediately");
+  assert.equal((await readJson(target.lockFile)).skills["pi-delegate"].ref, targetRef, "the Skill lock record is updated");
 });
 
 test("add and setup regressions: add still refuses old MCP entries and setup still installs", async () => {

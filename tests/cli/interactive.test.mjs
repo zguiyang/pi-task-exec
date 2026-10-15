@@ -56,16 +56,22 @@ function jsonBlocks(text) {
 }
 
 /** Injectable interaction with scripted answers; records every prompt. */
-function scriptedInteraction({ selects = [], confirms = [] } = {}) {
+function scriptedInteraction({ selects = [], confirms = [], multiSelects = [] } = {}) {
   const calls = [];
   let selectIndex = 0;
   let confirmIndex = 0;
+  let multiSelectIndex = 0;
   return {
     calls,
     async select(question, choices, defaultValue) {
       calls.push({ type: "select", question, values: choices.map((choice) => choice.value), defaultValue });
       if (selectIndex >= selects.length) return defaultValue ?? null;
       return selects[selectIndex++];
+    },
+    async multiSelect(question, choices, defaultValues) {
+      calls.push({ type: "multiSelect", question, values: choices.map((choice) => choice.value), defaultValues });
+      if (multiSelectIndex >= multiSelects.length) return [...(defaultValues ?? [])];
+      return multiSelects[multiSelectIndex++];
     },
     async confirm(question, defaultValue) {
       calls.push({ type: "confirm", question, defaultValue });
@@ -279,41 +285,53 @@ test("add skill prompts for Agent and Scope and installs only the Skill", async 
   assert.equal(await exists(join(root, "project", ".codex", "config.toml")), false);
 });
 
-test("setup no-target prompts only for Agent and Scope, then confirms", async () => {
+test("setup prompts for Platforms and Scope, then installs without a plan confirmation", async () => {
   const root = await makeRoot();
   const target = skillPathsFor(root, "project");
   const { spawn, calls } = makeSkillSpawn({ ...target, scope: "project" });
-  const interaction = scriptedInteraction({ selects: ["codex", "project"], confirms: [true] });
+  // A scripted Yes is available but must never be requested: the streamlined
+  // setup asks for selections only and then executes the plan directly.
+  const interaction = scriptedInteraction({ multiSelects: [["codex", "opencode"]], selects: ["project"], confirms: [true] });
   const { deps, captured } = makeDeps(root, { interaction, skillSpawn: spawn });
   const action = await runCli(["setup", "--local-dev"], deps);
   assert.deepEqual(action, { kind: "exit", code: 0 });
-  assert.deepEqual(interaction.calls.map((call) => call.type), ["select", "select", "confirm"]);
-  assert.ok(captured.stdout().startsWith("Pi TaskExec Setup\n"));
-  assert.deepEqual(interaction.calls[0].values, ["codex", "zed", "opencode"], "first prompt is the Agent");
-  assert.deepEqual(interaction.calls[1].values, ["project", "global"], "second prompt is the Scope");
+  assert.deepEqual(interaction.calls.map((call) => call.type), ["multiSelect", "select"]);
+  assert.equal(interaction.calls[0].question, "Platforms", "first prompt is the Platform multi-select");
+  assert.deepEqual(interaction.calls[0].values, ["codex", "zed", "opencode"]);
+  assert.deepEqual(interaction.calls[0].defaultValues, ["codex"]);
+  assert.equal(interaction.calls[1].question, "Scope", "second prompt is the Scope");
+  assert.deepEqual(interaction.calls[1].values, ["project", "global"]);
   assert.ok(await exists(join(root, "project", ".codex", "config.toml")));
-  assert.ok(await exists(join(target.installDir, "SKILL.md")));
-  assert.equal(calls.length, 1);
-  assert.match(captured.stdout(), /Done\./);
+  assert.ok(await exists(join(root, "project", "opencode.json")));
+  assert.ok(await exists(target.installDir));
+  assert.equal(calls.length, 1, "the Skills CLI runs exactly once for both platforms");
+  assert.deepEqual(calls[0].args.slice(calls[0].args.indexOf("--agent"), calls[0].args.indexOf("--skill")), ["--agent", "codex", "opencode"]);
+  assert.match(captured.stdout(), /codex: MCP installed/);
+  assert.match(captured.stdout(), /opencode: MCP installed/);
+  assert.match(captured.stdout(), /Skill: installed/);
+  assert.match(captured.stdout(), /Restart codex, opencode, then verify pi_list\./);
   assert.doesNotMatch(captured.stdout(), /Parts:|Execution:/);
   assert.doesNotMatch(captured.stdout(), /mcp: success|skill: success/);
+  assert.doesNotMatch(captured.stdout(), /Proceed with this plan/);
 });
 
 test("cancelling a prompt exits 0 with no side effects", async () => {
   const root = await makeRoot();
   const target = skillPathsFor(root, "project");
   const { spawn, calls } = makeSkillSpawn({ ...target, scope: "project" });
-  const interaction = scriptedInteraction({ selects: [null], confirms: [true] });
+  // Cancel at the Scope selection, after the Platforms answer was accepted.
+  const interaction = scriptedInteraction({ multiSelects: [["codex"]], selects: [null] });
   const { deps, captured } = makeDeps(root, { interaction, skillSpawn: spawn });
   const action = await runCli(["setup", "--local-dev"], deps);
   assert.deepEqual(action, { kind: "exit", code: 0 });
-  assert.match(captured.stdout(), /Cancelled(?:\.|:) (?:No files changed|no changes were made)\./);
-  assert.equal(calls.length, 0);
+  assert.deepEqual(interaction.calls.map((call) => call.type), ["multiSelect", "select"], "the cancellation happens at the Scope selection");
+  assert.doesNotMatch(captured.stdout(), /installed|updated|Restart/);
+  assert.equal(calls.length, 0, "no Skills CLI run after cancelling");
   assert.equal(await exists(join(root, "project", ".codex", "config.toml")), false);
   assert.equal(await exists(target.installDir), false);
 });
 
-test("answering No to the plan confirmation exits 0 with no side effects", async () => {
+test("a scripted No cannot cancel an explicit setup: no extra confirmation exists", async () => {
   const root = await makeRoot();
   const target = skillPathsFor(root, "project");
   const { spawn, calls } = makeSkillSpawn({ ...target, scope: "project" });
@@ -321,23 +339,27 @@ test("answering No to the plan confirmation exits 0 with no side effects", async
   const { deps, captured } = makeDeps(root, { interaction, skillSpawn: spawn });
   const action = await runCli(["setup", "--local-dev", "--host", "codex", "--scope", "project"], deps);
   assert.deepEqual(action, { kind: "exit", code: 0 });
-  assert.match(captured.stdout(), /Cancelled(?:\.|:) (?:No files changed|no changes were made)\./);
-  assert.equal(calls.length, 0);
-  assert.equal(await exists(join(root, "project", ".codex", "config.toml")), false);
-  assert.equal(await exists(target.installDir), false);
+  assert.equal(interaction.calls.filter((call) => call.type === "confirm").length, 0, "no confirmation prompt is ever issued");
+  assert.doesNotMatch(captured.stdout(), /Cancelled|Proceed with this plan/);
+  assert.ok(await exists(join(root, "project", ".codex", "config.toml")));
+  assert.ok(await exists(target.installDir));
+  assert.equal(calls.length, 1);
+  assert.match(captured.stdout(), /Skill: installed/);
 });
 
-test("pre-supplied --host/--scope skip the Agent/Scope prompts", async () => {
+test("pre-supplied --host/--scope skip the Platforms/Scope prompts entirely", async () => {
   const root = await makeRoot();
   const target = skillPathsFor(root, "project");
   const { spawn } = makeSkillSpawn({ ...target, scope: "project" });
-  const interaction = scriptedInteraction({ confirms: [true] });
+  // Selection answers are scripted but must never be requested.
+  const interaction = scriptedInteraction({ multiSelects: [["zed"]], selects: ["global"] });
   const { deps, captured } = makeDeps(root, { interaction, skillSpawn: spawn });
   const action = await runCli(["setup", "--local-dev", "--host", "codex", "--scope", "project"], deps);
   assert.deepEqual(action, { kind: "exit", code: 0 });
-  assert.deepEqual(interaction.calls.map((call) => call.type), ["confirm"]);
+  assert.deepEqual(interaction.calls, [], "supplied selections mean no prompt at all");
   assert.ok(await exists(join(root, "project", ".codex", "config.toml")));
-  assert.ok(await exists(join(target.installDir, "SKILL.md")));
+  assert.ok(await exists(target.installDir));
+  assert.match(captured.stdout(), /codex: MCP installed/);
   assert.doesNotMatch(captured.stdout(), /Parts:|Execution:/);
 });
 

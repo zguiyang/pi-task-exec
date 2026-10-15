@@ -1,5 +1,6 @@
 import type { HostAdapter } from "../hosts/adapters.js";
-import { dirname } from "node:path";
+import { copyFile, lstat, mkdir, readdir, readFile, realpath, rm } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import type { CliIo } from "../io.js";
 import { highlight } from "../presentation.js";
 import { MANAGED_BY, type InstallPlan, type PlannedRemoval, type PlannedWrite } from "./model.js";
@@ -9,13 +10,16 @@ import {
   assertPathWithinRoots,
   atomicWriteFile,
   backupFile,
+  isWithin,
   removeFile,
   restoreBackup,
+  sha256,
   snapshotFile,
 } from "./safety.js";
 import {
   SKILL_CLI_TIMEOUT_MS,
   inspectSkillCliPaths,
+  readSkillLockRecord,
   skillsCliSpawnEnv,
   spawnSkillsCli,
   verifySkillsCliInstall,
@@ -94,6 +98,17 @@ export interface ExecutorOptions {
    * unchanged; any drift still blocks the spawn.
    */
   preconfirmedSkillSignature?: string;
+  /**
+   * Opt in to the automatic managed Skill update. It is consulted only when
+   * the value is `true`, the plan is `operation: "update"`, and the planner's
+   * Skill CLI install is re-proven to be owned by the fixed source at run
+   * time. In that mode the third-party Skills CLI update runs without any
+   * confirmation because a recoverable, timestamped backup of the entire
+   * existing Skill directory is taken beside `skills/` (under `.agents/`)
+   * before the spawn. When `false`/unset, and for `add`, `setup`, or an owner
+   * that cannot be re-proven, every legacy confirmation rule is preserved.
+   */
+  autoManagedSkillUpdate?: boolean;
 }
 
 function adaptersFor(adapters: readonly HostAdapter[], host: string | undefined): HostAdapter | undefined {
@@ -432,6 +447,264 @@ function skillReplacementConfirmation(findings: readonly SkillCliSafetyFinding[]
   };
 }
 
+// ---------------------------------------------------------------------------
+// Automatic managed Skill update (`ExecutorOptions.autoManagedSkillUpdate`)
+// ---------------------------------------------------------------------------
+
+/** One validated entry of the existing Skill directory tree. */
+interface SkillDirectoryEntry {
+  relative: string;
+  kind: "file" | "directory";
+  size: number;
+  sha256: string | null;
+}
+
+interface SkillDirectoryScan {
+  ok: boolean;
+  missing: boolean;
+  realDir: string | null;
+  entries: SkillDirectoryEntry[];
+  error?: ExecutionError;
+}
+
+function unsafeSkillEntry(path: string, reason: string): ExecutionError {
+  return { code: "skill_backup_unsafe_entry", message: `Refusing to back up the Skill directory because ${reason}: ${path}` };
+}
+
+function unreadableSkillPath(path: string, error: unknown): ExecutionError {
+  const code = errorCode(error);
+  const message = error instanceof Error ? error.message : String(error);
+  // An entry that vanishes while it is read is not an I/O problem: the tree
+  // changed under the scan, which is drift and must fail closed.
+  return {
+    code: code === "ENOENT" ? "skill_directory_drift" : (code ?? "skill_backup_unreadable"),
+    message: `Cannot validate the Skill directory path ${path}: ${message}`,
+  };
+}
+
+/**
+ * Walk the whole existing Skill directory without ever following a link. Every
+ * entry must be a regular file or a real directory that still resolves inside
+ * the Skill directory. Symlinks (even ones that stay inside the tree),
+ * non-regular entries, path escapes, and entries that change while they are
+ * read are hard refusals raised before any confirmation or spawn.
+ */
+async function scanSkillDirectory(installDir: string, options: ExecutorOptions): Promise<SkillDirectoryScan> {
+  const refused = (error: ExecutionError): SkillDirectoryScan => ({ ok: false, missing: false, realDir: null, entries: [], error });
+  // Reject lexical traversal and symlinked ancestors that leave the allowed
+  // roots before a single directory entry is read.
+  try {
+    await assertPathWithinRoots(installDir, { roots: mergeRoots(options) });
+  } catch (error) {
+    if (error instanceof SafetyError) return refused({ code: error.code, message: error.message });
+    throw error;
+  }
+  let root: Awaited<ReturnType<typeof lstat>>;
+  try {
+    root = await lstat(installDir);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { ok: true, missing: true, realDir: null, entries: [] };
+    return refused(unreadableSkillPath(installDir, error));
+  }
+  if (root.isSymbolicLink()) return refused(unsafeSkillEntry(installDir, "the Skill directory itself is a symlink"));
+  if (!root.isDirectory()) return refused(unsafeSkillEntry(installDir, "the Skill path is not a directory"));
+  let realDir: string;
+  try {
+    realDir = await realpath(installDir);
+  } catch (error) {
+    return refused(unreadableSkillPath(installDir, error));
+  }
+  const entries: SkillDirectoryEntry[] = [];
+  const walk = async (current: string, prefix: string): Promise<ExecutionError | null> => {
+    let names: string[];
+    try {
+      names = await readdir(current);
+    } catch (error) {
+      return unreadableSkillPath(current, error);
+    }
+    for (const name of [...names].sort()) {
+      const child = join(current, name);
+      const relative = prefix === "" ? name : `${prefix}/${name}`;
+      let entry: Awaited<ReturnType<typeof lstat>>;
+      try {
+        entry = await lstat(child);
+      } catch (error) {
+        return unreadableSkillPath(child, error);
+      }
+      if (entry.isSymbolicLink()) return unsafeSkillEntry(child, "a symlink inside the Skill directory would be followed");
+      if (!entry.isDirectory() && !entry.isFile()) return unsafeSkillEntry(child, "a non-regular entry inside the Skill directory cannot be backed up");
+      let realChild: string;
+      try {
+        realChild = await realpath(child);
+      } catch (error) {
+        return unreadableSkillPath(child, error);
+      }
+      if (!isWithin(realDir, realChild)) {
+        return { code: "skill_path_escape", message: `Refusing to back up a Skill entry that resolves outside the Skill directory: ${child}` };
+      }
+      if (entry.isDirectory()) {
+        entries.push({ relative, kind: "directory", size: 0, sha256: null });
+        const deeper = await walk(child, relative);
+        if (deeper) return deeper;
+        continue;
+      }
+      let content: Buffer;
+      try {
+        content = await readFile(child);
+      } catch (error) {
+        return unreadableSkillPath(child, error);
+      }
+      entries.push({ relative, kind: "file", size: entry.size, sha256: sha256(content) });
+    }
+    return null;
+  };
+  const failure = await walk(installDir, "");
+  if (failure) return refused(failure);
+  return { ok: true, missing: false, realDir, entries };
+}
+
+function skillManifest(entries: readonly SkillDirectoryEntry[]): string {
+  return [...entries]
+    .sort((left, right) => (left.relative < right.relative ? -1 : left.relative > right.relative ? 1 : 0))
+    .map((entry) => `${entry.kind}:${entry.size}:${entry.sha256 ?? ""}:${entry.relative}`)
+    .join("\n");
+}
+
+type AutoSkillUpdateDecision = { mode: "off" } | { mode: "auto" } | { mode: "conflict"; error: ExecutionError };
+
+/**
+ * Decide whether this exact Skill CLI update may run automatically. Every
+ * condition is required: the explicit opt-in, an `update` plan, the planner's
+ * own Skill CLI description (the planner proved ownership through the fixed
+ * lock record), and a re-proof of that ownership right now. Anything else —
+ * `add`/`setup`, an unknown owner, an unreadable lock — returns `off` so the
+ * legacy confirmation rules apply unchanged. The whole existing Skill
+ * directory must also be provably backup-able; if it is not, the operation is
+ * refused outright instead of falling back to a prompt.
+ */
+async function decideAutoManagedSkillUpdate(plan: InstallPlan, cli: SkillCliPlan, options: ExecutorOptions): Promise<AutoSkillUpdateDecision> {
+  if (options.autoManagedSkillUpdate !== true) return { mode: "off" };
+  if (plan.operation !== "update") return { mode: "off" };
+  if (plan.skillCli !== cli) return { mode: "off" };
+  const lock = await readSkillLockRecord(cli.lockFile);
+  if (!lock.ok) return { mode: "off" };
+  const record = lock.record;
+  if (!record.present || record.source !== cli.expectedSource || typeof record.ref !== "string" || record.ref === "") return { mode: "off" };
+  const scan = await scanSkillDirectory(cli.installDir, options);
+  if (!scan.ok) return { mode: "conflict", error: scan.error as ExecutionError };
+  if (scan.missing) {
+    return {
+      mode: "conflict",
+      error: { code: "skill_backup_missing", message: `There is no existing Skill directory to back up at ${cli.installDir}; refusing an automatic update.` },
+    };
+  }
+  return { mode: "auto" };
+}
+
+/** Copy a validated tree without ever following a symlink or special file. */
+async function copySkillTree(source: string, destination: string, options: ExecutorOptions, createDestination: boolean): Promise<void> {
+  if (createDestination) {
+    await assertPathWithinRoots(destination, { roots: mergeRoots(options) });
+    await mkdir(destination);
+  }
+  const names = (await readdir(source)).sort();
+  for (const name of names) {
+    const from = join(source, name);
+    const to = join(destination, name);
+    const entry = await lstat(from);
+    if (entry.isSymbolicLink()) throw new SafetyError("skill_backup_unsafe_entry", `Refusing to copy a symlink from the Skill directory: ${from}`);
+    if (entry.isDirectory()) {
+      await copySkillTree(from, to, options, true);
+      continue;
+    }
+    if (!entry.isFile()) throw new SafetyError("skill_backup_unsafe_entry", `Refusing to copy a non-regular entry from the Skill directory: ${from}`);
+    await assertPathWithinRoots(to, { roots: mergeRoots(options) });
+    await copyFile(from, to);
+  }
+}
+
+interface SkillDirectoryBackup {
+  ok: boolean;
+  error?: ExecutionError;
+  backupPath: string | null;
+  manifest: string | null;
+  realDir: string | null;
+}
+
+/**
+ * Take a recoverable, timestamped sibling backup of the entire existing Skill
+ * directory before the third-party spawn. The copy is written beside `skills/`
+ * (under `.agents/`), never inside `skills/`, because hosts discover installed
+ * Skills by scanning that directory and must never see the backup as another
+ * install. Creation is collision-safe, the copy is verified against the
+ * validated manifest, and a partial copy is removed on any failure.
+ */
+async function backupSkillDirectory(installDir: string, options: ExecutorOptions): Promise<SkillDirectoryBackup> {
+  const failed = (error: ExecutionError): SkillDirectoryBackup => ({ ok: false, error, backupPath: null, manifest: null, realDir: null });
+  const scan = await scanSkillDirectory(installDir, options);
+  if (!scan.ok) return failed(scan.error as ExecutionError);
+  if (scan.missing) {
+    return failed({ code: "skill_backup_missing", message: `There is no existing Skill directory to back up at ${installDir}; refusing to run the Skills CLI.` });
+  }
+  const skillsRoot = dirname(installDir);
+  const parent = dirname(skillsRoot);
+  if (parent === skillsRoot || isWithin(skillsRoot, parent)) {
+    return failed({ code: "skill_backup_location", message: `Refusing to place a Skill backup inside the skills directory: ${skillsRoot}` });
+  }
+  const stamp = (options.now?.() ?? new Date()).toISOString().replace(/[:.]/g, "-");
+  const stem = `${basename(installDir)}.backup-${stamp}`;
+  let created: string | null = null;
+  for (let attempt = 0; created === null && attempt < 1_000; attempt += 1) {
+    const candidate = join(parent, attempt === 0 ? stem : `${stem}-${attempt}`);
+    try {
+      await assertPathWithinRoots(candidate, { roots: mergeRoots(options) });
+      // Non-recursive on purpose: EEXIST means this name is taken and an
+      // existing backup must never be clobbered.
+      await mkdir(candidate);
+      created = candidate;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") continue;
+      if (error instanceof SafetyError) return failed({ code: error.code, message: error.message });
+      return failed({ code: errorCode(error) ?? "skill_backup_failed", message: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  if (created === null) {
+    return failed({ code: "skill_backup_conflict", message: `Could not reserve a unique Skill backup name beside ${skillsRoot}.` });
+  }
+  try {
+    await copySkillTree(installDir, created, options, false);
+  } catch (error) {
+    await rm(created, { recursive: true, force: true }).catch(() => undefined);
+    if (error instanceof SafetyError) return failed({ code: error.code, message: error.message });
+    return failed({ code: errorCode(error) ?? "skill_backup_failed", message: error instanceof Error ? error.message : String(error) });
+  }
+  const verify = await scanSkillDirectory(created, options);
+  if (!verify.ok || verify.missing || skillManifest(verify.entries) !== skillManifest(scan.entries)) {
+    await rm(created, { recursive: true, force: true }).catch(() => undefined);
+    if (!verify.ok) return failed(verify.error as ExecutionError);
+    return failed({ code: "skill_directory_drift", message: `The Skill directory changed while its backup was written; refusing to run the Skills CLI: ${installDir}` });
+  }
+  return { ok: true, backupPath: created, manifest: skillManifest(scan.entries), realDir: scan.realDir };
+}
+
+/** Re-read the Skill directory immediately before the spawn and compare it to
+ * the validated, backed-up state. Any difference is drift and refuses the
+ * third-party CLI. */
+async function skillDirectoryDrift(
+  installDir: string,
+  expected: { manifest: string; realDir: string | null },
+  options: ExecutorOptions,
+): Promise<ExecutionError | null> {
+  const scan = await scanSkillDirectory(installDir, options);
+  if (!scan.ok) return scan.error as ExecutionError;
+  if (scan.missing) return { code: "skill_directory_drift", message: `The Skill directory disappeared before the Skills CLI could run: ${installDir}` };
+  if (scan.realDir !== expected.realDir) return { code: "skill_directory_drift", message: `The resolved Skill directory path changed before the Skills CLI could run: ${installDir}` };
+  if (skillManifest(scan.entries) !== expected.manifest) {
+    return { code: "skill_directory_drift", message: `The Skill directory changed after its backup was taken; refusing to run the Skills CLI: ${installDir}` };
+  }
+  return null;
+}
+
 /**
  * Execute the pinned Skills CLI after the same preflight/confirmation seam as
  * config writes. The CLI install is intentionally not treated as atomic: no
@@ -439,6 +712,13 @@ function skillReplacementConfirmation(findings: readonly SkillCliSafetyFinding[]
  */
 async function executeSkillCli(plan: InstallPlan, cli: SkillCliPlan, options: ExecutorOptions): Promise<ExecutionResult> {
   const base: ExecutionResult = emptyResult("success");
+
+  // The automatic managed update is decided first: an unusable Skill directory
+  // is a hard refusal before any prompt, and an eligible one removes every
+  // confirmation prompt below because the whole directory is backed up first.
+  const auto = await decideAutoManagedSkillUpdate(plan, cli, options);
+  if (auto.mode === "conflict") return { ...base, status: "conflict", errors: [auto.error] };
+  const automatic = auto.mode === "auto";
 
   const pre = await inspectSkillExecutionTargets(cli, options);
   if (!pre.ok) {
@@ -450,9 +730,10 @@ async function executeSkillCli(plan: InstallPlan, cli: SkillCliPlan, options: Ex
   // A combined plan asks the replacement confirmation before any MCP write and
   // passes the inspected signature here. Re-ask only when the signature does
   // not match (including when `--yes` was requested but a replacement needs an
-  // explicit default-No answer).
+  // explicit default-No answer). An eligible automatic managed update never
+  // asks: the recoverable backup below is the compensating control.
   const preconfirmed = options.preconfirmedSkillSignature !== undefined && options.preconfirmedSkillSignature === initialSignature;
-  if (!preconfirmed && (!options.yes || replacement)) {
+  if (!automatic && !preconfirmed && (!options.yes || replacement)) {
     if (!options.confirm) return { ...base, status: "cancelled" };
     const safety = replacement ? skillReplacementConfirmation(pre.findings ?? []) : undefined;
     const confirmed = await options.confirm(plan, safety);
@@ -473,6 +754,35 @@ async function executeSkillCli(plan: InstallPlan, cli: SkillCliPlan, options: Ex
       status: "conflict",
       errors: [{ code: "skill_targets_changed", message: "The skill target paths changed during confirmation; refusing to run the Skills CLI." }],
     };
+  }
+
+  const backups: Array<{ path: string; backupPath: string | null }> = [];
+  if (automatic) {
+    const backup = await backupSkillDirectory(cli.installDir, options);
+    if (!backup.ok || backup.backupPath === null || backup.manifest === null || backup.realDir === null) {
+      return {
+        ...base,
+        status: "conflict",
+        errors: [backup.error ?? { code: "skill_backup_failed", message: `Could not back up the existing Skill directory at ${cli.installDir}.` }],
+        backups,
+      };
+    }
+    backups.push({ path: cli.installDir, backupPath: backup.backupPath });
+    // Everything may have changed while the backup was written: re-inspect the
+    // target paths and re-read the tree so the spawn only ever sees the exact
+    // state that was validated and backed up.
+    const post = await inspectSkillExecutionTargets(cli, options);
+    if (!post.ok) return { ...base, status: "conflict", errors: [post.error as ExecutionError], backups };
+    if (post.signature !== initialSignature) {
+      return {
+        ...base,
+        status: "conflict",
+        errors: [{ code: "skill_targets_changed", message: "The skill target paths changed while the Skill backup was taken; refusing to run the Skills CLI." }],
+        backups,
+      };
+    }
+    const drift = await skillDirectoryDrift(cli.installDir, { manifest: backup.manifest, realDir: backup.realDir }, options);
+    if (drift) return { ...base, status: "conflict", errors: [drift], backups };
   }
 
   const spawn = options.skillSpawn ?? spawnSkillsCli;
@@ -503,10 +813,11 @@ async function executeSkillCli(plan: InstallPlan, cli: SkillCliPlan, options: Ex
       ...base,
       status: "failed",
       errors: verification.errors.map((message) => ({ code: "skill_cli_verification_failed", message })),
+      backups,
       warnings: [...verification.warnings],
     };
   }
-  return { ...base, status: "success", performed: [cli.installDir], warnings: [...verification.warnings] };
+  return { ...base, status: "success", performed: [cli.installDir], backups, warnings: [...verification.warnings] };
 }
 
 /**
@@ -649,10 +960,26 @@ export async function executePlan(plan: InstallPlan, options: ExecutorOptions): 
   // is visible.
   if (plan.target === "both" && (skillCli !== undefined || plan.operation === "update")) {
     const hasMutation = hasConfigWrites || skillCli !== undefined;
+    // Automatic managed Skill update is decided before any prompt so an unsafe
+    // Skill directory refuses the whole plan with no MCP mutation and no
+    // confirmation, while an eligible update skips both the generic plan
+    // confirmation and the default-No replacement confirmation below.
+    let automaticSkillUpdate = false;
+    if (skillCli) {
+      const decision = await decideAutoManagedSkillUpdate(plan, skillCli, options);
+      if (decision.mode === "conflict") {
+        const error = decision.error;
+        const mcpPart = { ...emptyResult("no-op"), warnings: ["No MCP changes were applied because the Skill preflight failed."] };
+        const skillPart = { ...emptyResult("conflict"), errors: [error] };
+        return { ...emptyResult("conflict"), errors: [error], warnings: [...mcpPart.warnings], parts: [partOf("mcp", mcpPart), partOf("skill", skillPart)] };
+      }
+      automaticSkillUpdate = decision.mode === "auto";
+    }
+
     // A plan with no mutations (both components absent or already at target)
     // is a clear no-op. Never ask the operator to confirm a plan that writes
     // nothing; the plan warnings point at `setup`.
-    if (hasMutation && !options.yes) {
+    if (hasMutation && !options.yes && !automaticSkillUpdate) {
       if (!options.confirm) return combineParts([partOf("mcp", emptyResult("cancelled")), partOf("skill", emptyResult("cancelled"))]);
       const confirmed = await options.confirm(plan);
       if (!confirmed) return combineParts([partOf("mcp", emptyResult("cancelled")), partOf("skill", emptyResult("cancelled"))]);
@@ -661,7 +988,8 @@ export async function executePlan(plan: InstallPlan, options: ExecutorOptions): 
     // Inspect the Skill target and ask any replacement-safety confirmation
     // before an MCP write can happen. `--yes` cannot bypass the default-No
     // replacement prompt, and unsafe paths abort the whole plan with no MCP
-    // mutation.
+    // mutation. An eligible automatic managed update owns its own backup and
+    // therefore never asks this prompt.
     let preconfirmedSkillSignature: string | undefined;
     if (skillCli) {
       const pre = await inspectSkillExecutionTargets(skillCli, options);
@@ -672,7 +1000,7 @@ export async function executePlan(plan: InstallPlan, options: ExecutorOptions): 
         return { ...emptyResult("conflict"), errors: [error], warnings: [...mcpPart.warnings], parts: [partOf("mcp", mcpPart), partOf("skill", skillPart)] };
       }
       preconfirmedSkillSignature = pre.signature;
-      if (pre.replacement) {
+      if (pre.replacement && !automaticSkillUpdate) {
         if (!options.confirm) return combineParts([partOf("mcp", emptyResult("cancelled")), partOf("skill", emptyResult("cancelled"))]);
         const confirmed = await options.confirm(plan, skillReplacementConfirmation(pre.findings ?? []));
         if (!confirmed) return combineParts([partOf("mcp", emptyResult("cancelled")), partOf("skill", emptyResult("cancelled"))]);

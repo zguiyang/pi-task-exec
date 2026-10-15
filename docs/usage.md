@@ -11,10 +11,11 @@ product overview and quick start see [README](../README.md).
 | `pi-task-exec` / `--help` | Print help and exit; never starts MCP. |
 | `--version` | Print the package version and exit. |
 | `mcp serve` | Start the MCP stdio runtime (only server-start command). |
-| `setup` | Plan and install the MCP entry and/or `pi-delegate` Skill. |
-| `update` | In-place update of already-installed MCP and Skill components. |
-| `add mcp` | Plan and write the MCP entry. |
-| `remove mcp` | Remove the managed MCP entry only. |
+| `setup` | Keyboard multi-select of hosts and one scope; plan and install the MCP entry and/or `pi-delegate` Skill. |
+| `update` | Keyboard multi-select of hosts and one scope; in-place update of already-installed MCP and Skill components. |
+| `uninstall` | Remove the managed `pi-task-exec` MCP entries only; the shared Skill is retained unless explicitly requested. |
+| `add mcp` | Plan and write the MCP entry for one host. |
+| `remove mcp` | Remove the managed MCP entry only, for one host. |
 | `add skill` | Install the `pi-delegate` Skill. |
 | `remove skill` | Not supported yet; reports as unsupported. |
 | `doctor` | Read-only environment, host, and version check. |
@@ -23,23 +24,32 @@ product overview and quick start see [README](../README.md).
 
 | Option | Applies to | Purpose |
 | --- | --- | --- |
-| `--host <name>` | install/remove/setup/update | One of `codex`, `zed`, `opencode`. |
-| `--scope <name>` | install/remove/setup/update | `project` or `global`. |
+| `--host <name>` | setup/update/uninstall/add/remove | One of `codex`, `zed`, `opencode`. Repeatable for `setup`, `update`, and `uninstall` (one host per flag); `add`/`remove` take one host per run. |
+| `--scope <name>` | setup/update/uninstall/add/remove | Exactly one of `project` or `global` per run, shared by every selected host. |
+| `--remove-skill` | `uninstall` only | Explicitly remove the shared `pi-delegate` Skill after an ownership check. |
 | `--target <name>` | `setup` only | `mcp`, `skill`, or `both`; overrides the combined plan. |
-| `--dry-run` | write commands | Print the plan and exit without writing. |
+| `--dry-run` | write commands | Print the full plan and exit without writing. |
 | `--json` | all commands | Stable machine-readable output; never prompts. |
-| `--yes` | write commands | Skip confirmation after the plan is printed. |
+| `--yes` | write commands | Non-interactive compatibility flag; never overrides unsafe-path checks. |
 | `--interactive`, `-i` | write commands | Force prompting for missing selections on a TTY. |
 | `--local-dev` | source checkout | Allow an absolute local checkout launch entry. |
 | `--npm-prefix <dir>` | MCP install/update | Independent npm resolution directory without `package.json` or `node_modules`. |
 | `--require-mcp` | Codex MCP install/update | Write the native `required = true` field. |
 | `--probe` | `doctor` only | Handshake with the package MCP; never creates a worker. |
 
-Write commands print a plan with absolute paths, conflicts, backups, and
-warnings, then revalidate before writing. Conflicts block the whole operation.
-On a TTY, missing `--host`/`--scope` are prompted. With `--json`, missing
-selections are an error instead of a prompt. `--yes` cannot bypass the
-existing-Skill replacement confirmation.
+On a TTY, `setup`, `update`, and `uninstall` open a keyboard multi-select for
+the hosts (`codex`, `zed`, `opencode`) and a single selection for `project` or
+`global`; `--host` and `--scope` prefill those selections. A routine TTY run
+prints a concise result per selected host — what changed, the final status,
+and the next step (restart the host and verify `pi_list`) — and does not print
+the full plan or ask for a `Proceed?` confirmation.
+
+`--dry-run` prints the full plan with absolute paths, conflicts, backups, and
+warnings, then exits without writing. A conflict blocks the affected target.
+`--json` prints the stable machine-readable plan and result and never prompts.
+Without a TTY, selections must come from the flags, where a missing `--host`
+or `--scope` is an error instead of a prompt. Unsafe Skill replacement is
+reported rather than silently approved by `--yes`.
 
 ## Manual launch and host configuration
 
@@ -119,7 +129,28 @@ fallback to `main` or `@latest`. The installer verifies the installed
 `SKILL.md` frontmatter and the lockfile source/ref before reporting success;
 the copy is not transactional and provides no rollback. The bundled Skill
 carries MCP-metadata `version: "6"` for the updated delegation policy. `remove skill` is
-not supported yet.
+not supported yet; removing the shared Skill is only offered through
+`uninstall` as an explicit, opt-in step (see
+[Uninstalling](#uninstalling)).
+
+## Uninstalling
+
+`uninstall` removes only the managed `pi-task-exec` MCP entries for the
+selected hosts and one scope. Unrelated MCP servers and the rest of each
+host's configuration are left untouched. It accepts repeated `--host` flags,
+exactly one `--scope`, `--remove-skill` for explicit shared Skill removal, and
+the usual `--dry-run` and `--json` output modes.
+
+The shared `pi-delegate` Skill is retained by default: other projects and
+hosts may rely on the same copy. Nothing about the Skill changes unless its
+removal is explicitly requested in the uninstall flow. When it is explicitly
+requested, the CLI prints a warning that the Skill is shared, detects
+references in the known Codex, Zed, and OpenCode configuration locations,
+reports which known hosts still reference it. Choosing Skill removal is the
+explicit approval; there is no second confirmation prompt.
+
+`add` and `remove` remain available as the single-target subcommands;
+`remove mcp` still removes only the managed MCP entry for one host.
 
 ## Choosing whether to delegate
 
@@ -199,6 +230,8 @@ authentication configuration; no secret environment variable is needed here.
 ## Current limitations
 
 - `remove skill` is not supported yet and reports as unsupported.
+- `uninstall` retains the shared `pi-delegate` Skill by default; the Skill is
+  untouched unless its removal is explicitly requested.
 - Skill installation is not transactional; no rollback is provided.
 - Saving a configuration does not establish a live host connection; verify
   `pi_list` in the host. `doctor --probe` checks only the package runtime.

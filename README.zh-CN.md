@@ -14,7 +14,7 @@ Pi TaskExec 让主智能体按需通过 MCP 将边界明确的调查、分析、
 - 完整的工作进程生命周期：spawn、带界等待的 status、steer、continue、取消（`pi_abort`）、释放（`pi_release`），以及 list。
 - 只读 `inspect`（默认）与可读写的 `implement` 能力配置。
 - 工作目录由 Supervisor 指定；MCP 仅做授权校验，绝不创建 worktree 或分支。
-- 面向 Codex、Zed、OpenCode 的统一 MCP + `pi-delegate` Skill 安装。
+- 统一的 MCP + `pi-delegate` Skill 安装，可在 Codex、Zed、OpenCode 之间用键盘多选。
 
 ## 环境要求
 
@@ -33,27 +33,41 @@ npx -y @zguiyang/pi-task-exec@latest setup
 > 工作进程接口变更仍然适用；如果从 v0.2.2 升级，请先阅读
 > [v0.3.0 迁移说明](docs/usage.md#version-compatibility-v030)。
 
-命令会提示选择宿主与作用域，打印 MCP 与 Skill 的写入计划并请求确认。
+在终端（TTY）下会打开键盘多选界面选择宿主（`codex`、`zed`、`opencode`），
+并选择唯一的作用域（`project` 或 `global`），随后直接执行并输出简洁结果；
+常规运行不打印完整计划，也不询问“是否继续”。需要完整细节时用 `--dry-run`
+查看计划（路径、冲突、警告），用 `--json` 获取稳定的机器可读输出。
 `pi-delegate` Skill 会从本仓库（`skills/pi-delegate`）按匹配的发布标签，
-经固定版本 Skills CLI `skills@1.7.1` 安装。也可以
-预先指定选项（仍需确认）：
+经固定版本 Skills CLI `skills@1.7.1` 安装。也可以预先指定选项：`--host`
+可重复传入以选择多个宿主，整个运行只接受一个 `--scope`：
 
 ```sh
-npx -y @zguiyang/pi-task-exec@latest setup --host codex --scope project
+npx -y @zguiyang/pi-task-exec@latest setup --host codex --host zed --scope project
 ```
 
-完成后重启宿主，按提示授予项目信任，并在宿主内确认 `pi_list` 可用。
+完成后重启所选宿主，按提示授予项目信任，并在宿主内确认 `pi_list` 可用。
 
 ## 命令
 
 ```sh
 npx -y @zguiyang/pi-task-exec@latest update
+npx -y @zguiyang/pi-task-exec@latest uninstall
 npx -y @zguiyang/pi-task-exec@latest doctor
 npx -y @zguiyang/pi-task-exec@latest doctor --probe
 ```
 
-`update` 会替换受管 MCP 条目与 Skill 文件，之前配置的自定义设置需要重新
-提供。`doctor` 为只读检查；`--probe` 仅检查包运行时，绝不创建工作进程。
+`setup`、`update`、`uninstall` 使用同一套键盘多选宿主与单一作用域，
+也支持重复传入 `--host`。`update` 会替换受管 MCP 条目与 Skill 文件，
+之前配置的自定义设置需要重新提供。
+
+`uninstall` 只移除所选宿主与作用域下的受管 `pi-task-exec` MCP 条目。
+共享的 `pi-delegate` Skill 默认保留；只有在明确要求移除时才会删除，
+此时会先输出警告，并报告仍引用它的已知宿主。
+非交互运行可用 `--remove-skill` 明确选择删除。
+
+原有的 `add`、`remove` 子命令（`add mcp`、`add skill`、`remove mcp`、
+`remove skill`）仍作为单目标命令保留。`doctor` 为只读检查；`--probe`
+仅检查包运行时，绝不创建工作进程。
 
 ## 了解更多
 
